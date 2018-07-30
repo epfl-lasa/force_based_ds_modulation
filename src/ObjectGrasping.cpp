@@ -176,49 +176,49 @@ bool ObjectGrasping::init()
   _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_grasping/"+_filename+".txt");
   if(!_outputFile.is_open())
   {
-    ROS_ERROR("Cannot open output data file, the data_grasping directory might be missing");
+    ROS_ERROR("[ObjectGrasping]: Cannot open output data file, the data_grasping directory might be missing");
     return false;
   }
 
   if(_mode == REACHING_GRASPING)
   {
-    ROS_INFO("Mode: REACHING_GRASPING");
+    ROS_INFO("[ObjectGrasping]: Mode: REACHING_GRASPING");
   }
   else if(_mode == REACHING_GRASPING_MANIPULATING)
   {
-    ROS_INFO("Mode: REACHING_GRASPING_MANIPULATING");
+    ROS_INFO("[ObjectGrasping]: Mode: REACHING_GRASPING_MANIPULATING");
   }
   else
   {
-    ROS_ERROR("Mode not recognized");
+    ROS_ERROR("[ObjectGrasping]: Mode not recognized");
     return false;
   }
 
   if(_targetForce>0.0f)
   {
-    ROS_INFO("Target force: %f", _targetForce);
+    ROS_INFO("[ObjectGrasping]: Target force: %f", _targetForce);
   }
   else
   {
-    ROS_ERROR("Target force should be positive");
+    ROS_ERROR("[ObjectGrasping]: Target force should be positive");
     return false;
   }
 
   if(!_n.getParamCached("/lwr/ds_param/damping_eigval0",_d1[RIGHT]))
   {
-    ROS_ERROR("Cannot read first eigen value of passive ds controller for right robot");
+    ROS_ERROR("[ObjectGrasping]: Cannot read first eigen value of passive ds controller for right robot");
     return false;
   }
 
   if(!_n.getParamCached("/lwr2/ds_param/damping_eigval0",_d1[LEFT]))
   {
-    ROS_ERROR("Cannot read first eigen value of passive ds controller for left robot");
+    ROS_ERROR("[ObjectGrasping]: Cannot read first eigen value of passive ds controller for left robot");
     return false;
   }
 
   if(!_workspace.init())
   {
-    ROS_ERROR("Cannot initialize robots' workspace");
+    ROS_ERROR("[ObjectGrasping]: Cannot initialize robots' workspace");
     return false;
   }
 
@@ -226,12 +226,12 @@ bool ObjectGrasping::init()
   { 
     // Wait for poses being published
     ros::spinOnce();
-    ROS_INFO("The object grabbing node is ready.");
+    ROS_INFO("[ObjectGrasping]: The object grabbing node is ready.");
     return true;
   }
   else 
   {
-    ROS_ERROR("The ros node has a problem.");
+    ROS_ERROR("[ObjectGrasping]: The ros node has a problem.");
     return false;
   }
 }
