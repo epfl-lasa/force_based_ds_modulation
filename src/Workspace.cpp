@@ -9,7 +9,7 @@ Workspace::Workspace()
 
 bool Workspace::init() 
 {
-    std::string dataPath = ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_workspace/workspace_0.17/";
+    std::string dataPath = ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_workspace/";
     std::string pathToMu = dataPath + "LWR_workspace_Model_mu.txt";
     std::string pathToPriors = dataPath + "LWR_workspace_Model_prior.txt";
     std::string pathToSigmas = dataPath + "/LWR_workspace_Model_Sigma.txt";
@@ -22,22 +22,22 @@ bool Workspace::init()
 
     if(!_muFile)
     {
-        std::cerr << "Unable to open file mu.txt \n";
+        ROS_ERROR("[Workspace]: Unable to open file mu.txt, the data_workspace directory might be missing");
         return false;
     }
     if(!_priorsFile)
     {
-        std::cerr << "Unable to open file prior.txt \n";
+        ROS_ERROR("[Workspace]: Unable to open file prior.txt, the data_workspace directory might be missing");
         return false;
     }
     if(!_sigmasFile)
     {
-        std::cerr << "Unable to open file sigma.txt \n";
+        ROS_ERROR("[Workspace]: Unable to open file sigma.txt, the data_workspace directory might be missing");
         return false;
     }
     if(!_thresholdFile)
     {
-        std::cerr << "Unable to open file threshold.txt \n";
+        ROS_ERROR("[Workspace]: Unable to open file threshold.txt, the data_workspace directory might be missing");
         return false;
     }
 
