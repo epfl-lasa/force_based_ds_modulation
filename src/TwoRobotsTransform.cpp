@@ -18,9 +18,8 @@ TwoRobotsTransform::~TwoRobotsTransform()
 	me->_n.shutdown();
 }
 
-bool TwoRobotsTransform::init() //! Initialization of the node. Its datatype (bool) reflect the success in initialization
+bool TwoRobotsTransform::init()
 {
-
   _averageCount = 0;
 
   for(int k = 0; k < NB_ROBOTS; k++)

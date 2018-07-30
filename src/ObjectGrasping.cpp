@@ -3,26 +3,23 @@
 
 ObjectGrasping* ObjectGrasping::me = NULL;
 
-ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string filename, ContactDynamics contactDynamics, float targetVelocity, float targetForce):
+ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string filename, Mode mode, float targetForce):
   _n(n),
   _loopRate(frequency),
   _dt(1.0f/frequency),
   _filename(filename),
-  _contactDynamics(contactDynamics),
-  _targetVelocity(targetVelocity),
+  _mode(mode),
   _targetForce(targetForce),
   _xCFilter(3,3,6,1.0f/frequency),
-  _xLFilter(3,3,6,1.0f/frequency),
+  _xDFilter(3,3,6,1.0f/frequency),
   _zDirFilter(3,3,6,1.0f/frequency)
 {
   me = this;
 
   _gravity << 0.0f, 0.0f, -9.80665f;
-  _loadOffset << 0.0f,0.0f,0.035f;
-  _toolOffset = 0.13f;
-  _loadMass = 0.7f;
-  // _objectDim << 0.31f, 0.21f, 0.21f;
-  // _objectDim << 0.22f, 0.41f, 0.22f;
+  _toolComPositionFromSensor << 0.0f,0.0f,0.035f;
+  _toolOffsetFromEE = 0.13f;
+  _toolMass = 0.2f;  // TO CHANGE !!!!
   _objectDim << 0.41f, 0.22f, 0.22f;
 
   _smax = 4.0f;
@@ -30,37 +27,48 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
   {
     _x[k].setConstant(0.0f);
     _q[k].setConstant(0.0f);
-    _xd[k].setConstant(0.0f);
-    _vdOrig[k].setConstant(0.0f);
-    _vdR[k].setConstant(0.0f);
-    _vd[k].setConstant(0.0f);
-    _omegad[k].setConstant(0.0f);
-    _qd[k].setConstant(0.0f);
-    _Fc[k].setConstant(0.0f);
-    _Tc[k].setConstant(0.0f);
-    _normalForce[k] = 0.0f;
-    _Fd[k] = 0.0f;
     _wrenchBias[k].setConstant(0.0f);
     _wrench[k].setConstant(0.0f);
     _filteredWrench[k].setConstant(0.0f);
-    _wrenchCount[k] = 0;
-    _wrenchBiasOK[k] = false;
+    
+    _xd[k].setConstant(0.0f);
+    _fx[k].setConstant(0.0f);
+    _vd[k].setConstant(0.0f);
+    _omegad[k].setConstant(0.0f);
+    _qd[k].setConstant(0.0f);
+    _normalForce[k] = 0.0f;
+    _Fd[k] = 0.0f;
+
     _firstRobotPose[k] = false;
     _firstRobotTwist[k] = false;
     _firstWrenchReceived[k] = false;
     _firstDampingMatrix[k] = false;
-    _lambda1[k] = 1.0f;
+
     _s[k] = _smax;
     _alpha[k] = 0.0f;
     _beta[k] = 0.0f;
-    _betap[k] = 0.0f;
     _gamma[k] = 0.0f;
     _gammap[k] = 0.0f;
     _ut[k] = 0.0f;
     _vt[k] = 0.0f;
     _dW[k] = 0.0f;
+    
+    _wrenchCount[k] = 0;
+    _wrenchBiasOK[k] = false;
+    _d1[k] = 1.0f;
   }
 
+  _objectReachable = false;
+  _objectGrasped = false;
+  _firstObjectPose = false;
+  _stop = false;
+  _ensurePassivity = true;
+  _goHome = false;
+
+  _taskAttractor << -0.4f, 0.5f, 0.6f;
+  _xhC << -0.4f, 0.45f, 0.7f;
+  _xhD << 0.0f,-1.0f,0.0f;
+  _xhD *= 0.7f; 
   _vdC.setConstant(0.0f);
   _vdD.setConstant(0.0f);
   _eD = 0.0f;
@@ -94,16 +102,8 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
   _xoD = (_p3+_p4-_p1-_p2)/2.0f;
   _xdD = _xoD;
 
-  _taskAttractor << -0.4f, 0.5f, 0.6f;
-
-  _objectReachable = false;
-  _objectGrabbed = false;
-  _firstObjectPose = false;
-  _stop = false;
-  _ensurePassivity = true;
-
   _filteredForceGain = 0.9f;
-  _grabbingForceThreshold = 4.0f;
+  _graspingForceThreshold = 4.0f;
   _offset.setConstant(0.0f);
 
   _averageCount = 0;
@@ -157,15 +157,14 @@ bool ObjectGrasping::init()
   // Publisher definitions
   _pubDesiredTwist[RIGHT] = _n.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 1);
   _pubDesiredOrientation[RIGHT] = _n.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 1);
-  _pubDesiredWrench[RIGHT] = _n.advertise<geometry_msgs::Wrench>("/lwr/joint_controllers/passive_ds_command_force", 1);
   _pubFilteredWrench[RIGHT] = _n.advertise<geometry_msgs::WrenchStamped>("ObjectGrasping/filteredWrenchRight", 1);
   _pubNormalForce[RIGHT] = _n.advertise<std_msgs::Float32>("ObjectGrasping/normalForceRight", 1);
 
   _pubDesiredTwist[LEFT] = _n.advertise<geometry_msgs::Twist>("/lwr2/joint_controllers/passive_ds_command_vel", 1);
   _pubDesiredOrientation[LEFT] = _n.advertise<geometry_msgs::Quaternion>("/lwr2/joint_controllers/passive_ds_command_orient", 1);
-  _pubDesiredWrench[LEFT] = _n.advertise<geometry_msgs::Wrench>("/lwr2/joint_controllers/passive_ds_command_force", 1);
   _pubFilteredWrench[LEFT] = _n.advertise<geometry_msgs::WrenchStamped>("ObjectGrasping/filteredWrenchLeft", 1);
   _pubNormalForce[LEFT] = _n.advertise<std_msgs::Float32>("ObjectGrasping/normalForceLeft", 1);
+
   _pubMarker = _n.advertise<visualization_msgs::Marker>("ObjectGrasping/cube", 1);
 
   // Dynamic reconfigure definition
@@ -174,33 +173,24 @@ bool ObjectGrasping::init()
 
   signal(SIGINT,ObjectGrasping::stopNode);
 
-  _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_grabbing/"+_filename+".txt");
+  _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_grasping/"+_filename+".txt");
   if(!_outputFile.is_open())
   {
     ROS_ERROR("Cannot open data file");
     return false;
   }
 
-  if(_contactDynamics == NONE)
+  if(_mode == REACHING_GRASPING)
   {
-    ROS_INFO("Contact dynamics: NONE");
+    ROS_INFO("Mode: REACHING_GRASPING");
   }
-  else if(_contactDynamics == LINEAR)
+  else if(_mode == REACHING_GRASPING_MANIPULATING)
   {
-    ROS_INFO("Contact dynamics: LINEAR");
-  }
-  else
-  {
-    ROS_ERROR("Contact dynamics not recognized");
-  }
-
-  if(_targetVelocity>0.0f)
-  {
-    ROS_INFO("Target velocity: %f", _targetVelocity);
+    ROS_INFO("Mode: REACHING_GRASPING_MANIPULATING");
   }
   else
   {
-    ROS_ERROR("Target velocity should be positive");
+    ROS_ERROR("Mode not recognized");
     return false;
   }
 
@@ -214,13 +204,13 @@ bool ObjectGrasping::init()
     return false;
   }
 
-  if(!_n.getParamCached("/lwr/ds_param/damping_eigval0",_lambda1[RIGHT]))
+  if(!_n.getParamCached("/lwr/ds_param/damping_eigval0",_d1[RIGHT]))
   {
     ROS_ERROR("Cannot read first eigen value of passive ds controller for right robot");
     return false;
   }
 
-  if(!_n.getParamCached("/lwr2/ds_param/damping_eigval0",_lambda1[LEFT]))
+  if(!_n.getParamCached("/lwr2/ds_param/damping_eigval0",_d1[LEFT]))
   {
     ROS_ERROR("Cannot read first eigen value of passive ds controller for left robot");
     return false;
@@ -258,24 +248,29 @@ void ObjectGrasping::run()
       _mutex.lock();
 
       // Check for update of passive ds controller eigen value
-      ros::param::getCached("/lwr/ds_param/damping_eigval0",_lambda1[RIGHT]);
-      ros::param::getCached("/lwr2/ds_param/damping_eigval0",_lambda1[LEFT]);
+      ros::param::getCached("/lwr/ds_param/damping_eigval0",_d1[RIGHT]);
+      ros::param::getCached("/lwr2/ds_param/damping_eigval0",_d1[LEFT]);
 
+      // Initialize optitrack
       if(!_optitrackOK)
       {
         optitrackInitialization();
       }
       else
       {
+        // Compute object pose from marker positions
         computeObjectPose();
+
         // Compute control command
         if(_firstObjectPose)
         {
+          // Check if object is reachable
           isObjectReachable();
 
+          // Compute control command
           computeCommand();
-
         }
+
         // Publish data to topics
         publishData();          
 
@@ -288,17 +283,15 @@ void ObjectGrasping::run()
     }
 
     ros::spinOnce();
-
     _loopRate.sleep();
   }
 
+  // Send zero command
   for(int k = 0; k < NB_ROBOTS; k++)
   {
     _vd[k].setConstant(0.0f);
     _omegad[k].setConstant(0.0f);
     _qd[k] = _q[k];
-    _Fc[k].setConstant(0.0f);
-    _Tc[k].setConstant(0.0f);
   }
 
   publishData();
@@ -318,6 +311,12 @@ void ObjectGrasping::stopNode(int sig)
 
 void ObjectGrasping::computeObjectPose()
 {
+  // Check if all markers on the object are tracked
+  // The four markers are positioned on the corner of the upper face:
+  // P2 ----- P3
+  // |        |
+  // |        |
+  // P1 ----- P4
   if(_markersTracked.segment(NB_ROBOTS,TOTAL_NB_MARKERS-NB_ROBOTS).sum() == TOTAL_NB_MARKERS-NB_ROBOTS)
   {
 
@@ -325,22 +324,24 @@ void ObjectGrasping::computeObjectPose()
     {
       _firstObjectPose = true;
     }
+
+    // Compute markers position in the right robot frame
     _p1 = _markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS_RIGHT);
     _p2 = _markersPosition.col(P2)-_markersPosition0.col(ROBOT_BASIS_RIGHT);
     _p3 = _markersPosition.col(P3)-_markersPosition0.col(ROBOT_BASIS_RIGHT);
     _p4 = _markersPosition.col(P4)-_markersPosition0.col(ROBOT_BASIS_RIGHT);
 
-    _xdC = (_p1+_p2+_p3+_p4)/4.0f;
-    _xdD = (_p3+_p4-_p1-_p2)/2.0f; 
+    // Compute object center position
     _xoC = (_p1+_p2+_p3+_p4)/4.0f;
+    // Compute object dimension vector
+    // The dimension obtained from the markers is adjusted to match the real
+    // object dimension
     _xoD = (_p3+_p4-_p1-_p2)/2.0f;
-    // _xoD = 0.18f*_xoD.normalized(); 
     _xoD = 0.20f*_xoD.normalized(); 
 
+    // Filter center position and dimension vector of the object
     SGF::Vec temp(3);
-
-    // Filter center position of object
-    _xCFilter.AddData((_p1+_p2+_p3+_p4)/4.0f);
+    _xCFilter.AddData(_xoC);
     _xCFilter.GetOutput(0,temp);
     _xoC = temp;
     Eigen::Vector3f xDir = _p2-_p1;
@@ -356,14 +357,14 @@ void ObjectGrasping::computeObjectPose()
     _xoC -= 1.0f*(_objectDim(2)/2.0f)*zDir;
       
     // Filter object direction
-    _xLFilter.AddData((_p3+_p4-_p1-_p2)/2.0f);
-    _xLFilter.GetOutput(0,temp);
+    _xDFilter.AddData(_xoD);
+    _xDFilter.GetOutput(0,temp);
     _xoD = 0.20f*temp.normalized();
 
     // std::cerr <<"real" << _xdD.norm() << " " <<_xdD.transpose() << std::endl;
     // std::cerr << "filter" <<  _xoD.norm() << " " <<_xoD.transpose() << std::endl;
 
-    // Update marker object position and orientation
+    // Update marker object position and orientation for RVIZ
     _msgMarker.pose.position.x = _xoC(0);
     _msgMarker.pose.position.y = _xoC(1);
     _msgMarker.pose.position.z = _xoC(2);
@@ -382,6 +383,7 @@ void ObjectGrasping::computeObjectPose()
 
 void ObjectGrasping::isObjectReachable()
 {
+  // Evaluate workspace model of both robots to check if object is reachable
   bool l = _workspace.isReachable(_xoC-_leftRobotOrigin);
   bool r = _workspace.isReachable(_xoC);
   if(r && l)
@@ -399,60 +401,64 @@ void ObjectGrasping::isObjectReachable()
 
 void ObjectGrasping::computeCommand()
 {
-  computeOriginalDynamics();
+  // Compute nominal DS
+  computeNominalDS();
 
+  // Update tank scalar variables
   updateTankScalars();
 
-  forceModulation();
+  // Compute modulated DS
+  computeModulatedDS();
 
+  // Compute desired orientation
   computeDesiredOrientation();
 }
 
 
-void ObjectGrasping::computeOriginalDynamics()
+void ObjectGrasping::computeNominalDS()
 {
   // Compute robots center + distance vector;
   _xC = (_x[LEFT]+_x[RIGHT])/2.0f;
   _xD = (_x[RIGHT]-_x[LEFT]);
 
-  std::cerr << _xD.norm() << std::endl;
-
-  // If robots grabbed object, adapt center attractor to be the current robot's center
-  // => kill the center dynamics 
+  // Compute errors to object center position and dimension vector 
   _eoD = (_xD-_xoD).dot(_xoD.normalized());
   _eoC = (_xoC-_xC).norm();
-  float alpha = Utils::smoothFall(_eoD,0.02f,0.1f)*Utils::smoothFall(_eoC,0.1f,0.2f); 
 
   // Check if object is grasped
-  if(_normalForce[LEFT]*alpha>_grabbingForceThreshold && _normalForce[RIGHT]*alpha>_grabbingForceThreshold)
+  float alpha = Utils::smoothFall(_eoD,0.02f,0.1f)*Utils::smoothFall(_eoC,0.1f,0.2f); 
+  if(_normalForce[LEFT]*alpha>_graspingForceThreshold && _normalForce[RIGHT]*alpha>_graspingForceThreshold)
   {
-    if(_objectGrabbed == false)
+    if(_objectGrasped == false)
     {
       ROS_INFO("Object grabbed");
     }
-    _objectGrabbed = true;
+    _objectGrasped = true;
   }
   else
   {
-    _objectGrabbed = false;
+    _objectGrasped = false;
   }
 
-  // Compute desired center position and distance direction
+  _goHome = false;
+  // Compute desired center position and distance vector
+  // based on reachable and grasping states
   if(_objectReachable)
   {
-    if(_objectGrabbed)
+    if(_objectGrasped) // Object reachable and grasped
     {
+
       _xdC = _xC;
     }
-    else
+    else // Object reachable but not grasped
     {
       _xdC = _xoC;
     }
-    if(_contactDynamics == LINEAR)
+
+    if(_mode == REACHING_GRASPING_MANIPULATING)
     {
       _xdD << 0.0f,-1.0f,0.0f;
       _xdD *= 0.20f;
-      // _xdD *= 0.41f;
     }
     else
     {
@@ -461,28 +467,28 @@ void ObjectGrasping::computeOriginalDynamics()
   }
   else
   {
-    if(_objectGrabbed)
+    if(_objectGrasped)  // Object not reachable but grasped (due to workspace model inaccuracies)
     {
       _xdC = _xC;
-      if(_contactDynamics == LINEAR)
+      if(_mode == REACHING_GRASPING_MANIPULATING)
       {
         _xdD << 0.0f,-1.0f,0.0f;
         _xdD *= 0.20f;
-        // _xdD *= 0.41f;
       }
-      else
+      else 
       {
         _xdD = _xoD; 
       }
     }
-    else
+    else // Object not reachable and not grasped
     {
-      _xdC << -0.4f, 0.45f, 0.7f;
-      _xdD << 0.0f,-1.0f,0.0f;
-      _xdD *= 0.7f; 
+      _goHome = true;
+      _xdC = _xhC;
+      _xdD = _xhD;
     }
   }
 
+  // Compute errors to object center position and dimension vector 
   _eD = (_xD-_xdD).dot(_xdD.normalized());
   _eC = (_xdC-_xC).norm();
 
@@ -494,23 +500,21 @@ void ObjectGrasping::computeOriginalDynamics()
     _eD = 0.0f;
   }
 
+  // Compute normal vector to the surface object for each robot
   _e1[LEFT] = _xdD.normalized();
   _e1[RIGHT] = -_xdD.normalized();
 
-
-  if(_contactDynamics == NONE)
+  // Compute desired robots' center position and distance vector dynamics
+  // from execution mode
+  if(_mode == REACHING_GRASPING)
   {
     _vdC = 4.0f*(_xdC-_xC);
   }
-  else if(_contactDynamics == LINEAR)
+  else if(_mode == REACHING_GRASPING_MANIPULATING)
   {
-    if(_objectGrabbed)
+    if(_objectGrasped)
     {
       _vdC = (_taskAttractor+_offset-_xC);
-      // _vdC = getCyclingMotionVelocity(_xC, _taskAttractor);
-      // _xdD << 0.0f,-1.0f,0.0f;
-      // _xdD *= 0.24f;
-      // _xdD = _xD;
     }
     else
     {
@@ -518,29 +522,20 @@ void ObjectGrasping::computeOriginalDynamics()
     }
   }
 
-  if(!_objectReachable && !_objectGrabbed)
-  {
-    _vdD = 2.0f*(_xdD-_xD);
-  }
-  else
-  {
-    // _vdD = 3.0f*(1-std::tanh(10.0f*(_xdC-_xC).norm()))*(_xdD-_xD);
-    _vdD = 2.0f*(_xdD-_xD);
-    // _vdD = 3.0f*Utils::smoothFall((_xdC-_xC).norm(),0.05f,0.15f)*(_xdD-_xD);
-  }
+  _vdD = 2.0f*(_xdD-_xD);
 
-  // Get robot dynamics + adjust z dynamics to make them at the same height
-  _vdOrig[RIGHT] = _vdC+_vdD/2.0f;
-  // _vdOrig[RIGHT](2) += -2.0f*(_x[RIGHT](2)-_x[LEFT](2));
-  _vdOrig[LEFT] = _vdC-_vdD/2.0f;
-  // _vdOrig[LEFT](2) += -2.0f*(_x[LEFT](2)-_x[RIGHT](2));
+  // Compute robots' nominal DS
+  _fx[RIGHT] = _vdC+_vdD/2.0f;
+  _fx[LEFT] = _vdC-_vdD/2.0f;
 
+  // Substract deside dynamics of the center to apply
+  // the modulation on the distance vector dynamics part of the nominal DS
   for(int k = 0; k < NB_ROBOTS; k++)
   { 
-    _vdR[k] = _vdOrig[k]-_vdC;
-    if(_vdR[k].dot(_e1[k])<0.0f && _objectGrabbed)
+    _fx[k] = _fx[k]-_vdC;
+    if(_fx[k].dot(_e1[k])<0.0f && _objectGrasped)
     {
-      _vdR[k].setConstant(0.0f);
+      _fx[k].setConstant(0.0f);
     }
   }
 }
@@ -563,7 +558,7 @@ void ObjectGrasping::updateTankScalars()
     float dz = 0.01f;
     float ds = 0.1f*_smax;
 
-    _ut[k] = _v[k].dot(_vdR[k]);
+    _ut[k] = _v[k].dot(_fx[k]);
 
     if(_s[k] < 0.0f && _ut[k] < 0.0f)
     {
@@ -593,8 +588,6 @@ void ObjectGrasping::updateTankScalars()
       _gamma[k] = 1.0f;
     }
 
-     // _gamma = 1.0f-smoothRise(_s,_smax-ds,_smax)*Utils::smoothFall(_vt,0.0f,dz)-Utils::smoothFall(_s,0.0f,ds)*smoothRise(_vt,-dz,0.0f);
-
     if(_vt[k]<FLT_EPSILON)
     {
       _gammap[k] = 1.0f;
@@ -603,61 +596,37 @@ void ObjectGrasping::updateTankScalars()
     {
       _gammap[k] = _gamma[k];
     }
-
-    // std::cerr << k << ": alpha: " << _alpha[k] << " beta: " << _beta[k] << " gamma: " << _gamma[k] << " gammap: " << _gammap[k] << std::endl;
   }
 }
 
 
-Eigen::Vector3f ObjectGrasping::getCyclingMotionVelocity(Eigen::Vector3f position, Eigen::Vector3f attractor)
-{
-  Eigen::Vector3f velocity;
-
-  position = position-attractor;
-
-  velocity(2) = -position(2);
-
-  float R = sqrt(position(0) * position(0) + position(1) * position(1));
-  float T = atan2(position(1), position(0));
-
-  float r = 0.05f;
-  float omega = M_PI;
-
-  velocity(0) = -(R-r) * cos(T) - R * omega * sin(T);
-  velocity(1) = -(R-r) * sin(T) + R * omega * cos(T);
-
-  return velocity;
-}
-
-
-void ObjectGrasping::forceModulation()
+void ObjectGrasping::computeModulatedDS()
 {
   for(int k = 0; k < NB_ROBOTS; k++)
   {
     _normalForce[k] = fabs((_wRb[k]*_filteredWrench[k].segment(0,3)).dot(_e1[k]));
-
-    // std::cerr << Utils::smoothFall(_eD,0.02f,0.1f) << std::endl;
     float alpha = Utils::smoothFall(_eoD,0.02f,0.1f)*Utils::smoothFall(_eoC,0.1f,0.2f);
 
-    if(_lambda1[k]<1.0f)
+    if(_d1[k]<1.0f)
     {
-      _lambda1[k] = 1.0f;
+      _d1[k] = 1.0f;
     }
 
-    if(_objectGrabbed)
+    // Compute desired force profile
+    if(_goHome)
     {
-      _Fd[k] = _targetForce;
-      // _Fd[k] = _targetForce*Utils::smoothFall(_eD,0.02f,0.1f);
+      _Fd[k] = 0.0f;
     }
     else
     {
-      // _Fd[k] = _targetForce*(1.0f-std::tanh(10.0f*_eD))*(1.0f-std::tanh(10.0f*(_xdC-_xC).norm()));    
-      _Fd[k] = _targetForce*alpha;    
-    }
-
-    if(!_objectReachable && !_objectGrabbed)
-    {
-      _Fd[k] = 0.0f;
+      if(_objectGrasped)
+      {
+        _Fd[k] = _targetForce;
+      }
+      else
+      {
+        _Fd[k] = _targetForce*alpha;    
+      }
     }
 
     if(_ensurePassivity)
@@ -665,22 +634,29 @@ void ObjectGrasping::forceModulation()
       _Fd[k]*=_gammap[k];
     }
 
-    float delta = std::pow(2.0f*_e1[k].dot(_vdR[k])*(_Fd[k]/_lambda1[k]),2.0f)+4.0f*std::pow(_vdR[k].norm(),4.0f); 
-
+    // Compute modulation gain
+    float delta = std::pow(2.0f*_e1[k].dot(_fx[k])*(_Fd[k]/_d1[k]),2.0f)+4.0f*std::pow(_fx[k].norm(),4.0f); 
     float la;
 
-    if(fabs(_vdR[k].norm())<FLT_EPSILON)
+    if(_goHome)
     {
-      la = 0.0f;
+      la = 1.0f;
     }
     else
     {
-      la = (-2.0f*_e1[k].dot(_vdR[k])*(_Fd[k]/_lambda1[k])+sqrt(delta))/(2.0f*std::pow(_vdR[k].norm(),2.0f));
-    }
-    
-    if(_ensurePassivity && _s[k] < 0.0f && _ut[k] < 0.0f)
-    {
-      la = 1.0f;
+      if(fabs(_fx[k].norm())<FLT_EPSILON)
+      {
+        la = 0.0f;
+      }
+      else
+      {
+        la = (-2.0f*_e1[k].dot(_fx[k])*(_Fd[k]/_d1[k])+sqrt(delta))/(2.0f*std::pow(_fx[k].norm(),2.0f));
+      }
+      
+      if(_ensurePassivity && _s[k] < 0.0f && _ut[k] < 0.0f)
+      {
+        la = 1.0f;
+      }
     }
 
     // Update tank dynamics
@@ -688,7 +664,7 @@ void ObjectGrasping::forceModulation()
 
     if(_firstDampingMatrix[k])
     {
-      ds = _dt*(_alpha[k]*_v[k].transpose()*_D[k]*_v[k]-_beta[k]*_lambda1[k]*(la-1.0f)*_ut[k]-_gamma[k]*_Fd[k]*_vt[k]);
+      ds = _dt*(_alpha[k]*_v[k].transpose()*_D[k]*_v[k]-_beta[k]*_d1[k]*(la-1.0f)*_ut[k]-_gamma[k]*_Fd[k]*_vt[k]);
 
       if(_s[k]+ds>=_smax)
       {
@@ -704,39 +680,23 @@ void ObjectGrasping::forceModulation()
       }
     }
 
-    _dW[k] = _lambda1[k]*(la-1.0f)*(1-_beta[k])*_ut[k]+_Fd[k]*(_gammap[k]-_gamma[k])*_vt[k]-(1-_alpha[k])*_v[k].transpose()*_D[k]*_v[k];
+    // Update robot's power flow
+    _dW[k] = _d1[k]*(la-1.0f)*(1-_beta[k])*_ut[k]+_Fd[k]*(_gammap[k]-_gamma[k])*_vt[k]-(1-_alpha[k])*_v[k].transpose()*_D[k]*_v[k];
 
-
-    if(_ensurePassivity)
-    {
-      _vd[k] = la*_vdR[k]+_gammap[k]*_Fd[k]*_e1[k]/_lambda1[k];
-    }
-    else
-    {
-      _vd[k] = la*_vdR[k]+_Fd[k]*_e1[k]/_lambda1[k];
-    }
-
+    // Comput modulated DS
+    _vd[k] = la*_fx[k]+_Fd[k]*_e1[k]/_d1[k];
     _vd[k]+=_vdC;
 
-    // std::cerr <<"Measured force: " << (-_wRb*_filteredWrench.segment(0,3)).dot(_e1) << " Fd:  " << _Fd*_lambda1 << " vdR: " << _vdR.norm() << std::endl;
-    std::cerr << k << ": Fd: " << _Fd[k] << " delta: " << delta << " la: " << la << " vdr.dot(e1) " << _e1[k].dot(_vdR[k]) << std::endl;
-    // std::cerr << k << ": " << _vdR[k].transpose() << " " << _vd[k].transpose() << std::endl;
-    // std::cerr << k << ": " << la*_vdR[k].transpose() << " " << temp*lb*_e1[k].transpose() << std::endl;
+    std::cerr << k << ": Fd: " << _Fd[k] << " delta: " << delta << " la: " << la << " vdr.dot(e1) " << _e1[k].dot(_fx[k]) << std::endl;
+    std::cerr << k << " Tank: " << _s[k]  <<" dW: " << _dW[k] <<std::endl;
 
-      std::cerr << k << " Tank: " << _s[k]  <<" dW: " << _dW[k] <<std::endl;
-      // std::cerr << _alpha[k]*_v[k].transpose()*_D[k]*_v[k]<< " " << -_beta[k]*_lambda1[k]*(la-1.0f)*_ut[k] << " " << -_gamma[k]*_Fd[k]*_vt[k] << std::endl;
-      // std::cerr << "at: " << _alpha[k]*_v[k].transpose()*_D[k]*_v[k] << std::endl;
-      // std::cerr << k << ": ut: " << _ut[k] <<  " " << -_beta[k]*_lambda1[k]*(la-1.0f)*_ut[k] << std::endl;
-      // std::cerr << k << ": vt: " << _vt[k] << " " << -_gamma[k]*_Fd[k]*_vt[k] << std::endl;
-
-    // Bound desired velocity  
+    // Bound desired velocity for safety
     if(_vd[k].norm()>_velocityLimit)
     {
       _vd[k] *= _velocityLimit/_vd[k].norm();
     }   
   }
 }
-
 
 
 void ObjectGrasping::computeDesiredOrientation()
@@ -784,11 +744,8 @@ void ObjectGrasping::computeDesiredOrientation()
     // Compute final quaternion on plane
     Eigen::Vector4f qf = Utils::quaternionProduct(qtemp,_q[k]);
 
-    // Perform quaternion slerp interpolation to progressively orient the end effector while approaching the plane
+    // Perform quaternion slerp interpolation to progressively orient the end effector while approaching the object surface
     _qd[k] = Utils::slerpQuaternion(_q[k],qf,1.0f-std::tanh(3.0f*_eD));
-    // _qd[k] = Utils::slerpQuaternion(_q[k],qf,Utils::smoothFall(_eD,0.3f,0.6f));
-    // std::cerr << k << " " << angle << " " <<Utils::smoothFall(_eD,0.3f,0.6f) << std::endl;
-    // Utils::smkoothFall(_eoD,0.02f,0.1f)
 
     if(_qd[k].dot(_qdPrev[k])<0.0f)
     {
@@ -802,7 +759,6 @@ void ObjectGrasping::computeDesiredOrientation()
     wq = 5.0f*Utils::quaternionProduct(qcurI,_qd[k]-_q[k]);
     Eigen::Vector3f omegaTemp = _wRb[k]*wq.segment(1,3);
     _omegad[k] = omegaTemp; 
-
     _qdPrev[k] = _qd[k];
   }
 }
@@ -813,13 +769,13 @@ void ObjectGrasping::logData()
   _outputFile << ros::Time::now() << " "
               << _x[LEFT].transpose() << " "
               << _v[LEFT].transpose() << " "
-              << _vdR[LEFT].transpose() << " "
+              << _fx[LEFT].transpose() << " "
               << _vd[LEFT].transpose() << " "
               << _normalForce[LEFT] << " "
               << _Fd[LEFT] << " "
               << _x[RIGHT].transpose() << " "
               << _v[RIGHT].transpose() << " "
-              << _vdR[RIGHT].transpose() << " "
+              << _fx[RIGHT].transpose() << " "
               << _vd[RIGHT].transpose() << " "
               << _normalForce[RIGHT] << " "
               << _Fd[RIGHT] << " "
@@ -829,23 +785,20 @@ void ObjectGrasping::logData()
               << _xoD.transpose() << " "
               << _xdC.transpose() << " "
               << _xdD.transpose() << " "
-              << (int) _objectGrabbed << " "
+              << (int) _objectGrasped << " "
               << (int) _ensurePassivity << " "
               << _s[LEFT] << " " 
               << _alpha[LEFT] << " "
               << _beta[LEFT] << " "
-              << _betap[LEFT] << " "
               << _gamma[LEFT] << " "
               << _gammap[LEFT] << " "
               << _dW[LEFT] << " "
               << _s[RIGHT] << " " 
               << _alpha[RIGHT] << " "
               << _beta[RIGHT] << " "
-              << _betap[RIGHT] << " "
               << _gamma[RIGHT] << " "
               << _gammap[RIGHT] << " "
               << _dW[RIGHT] << std::endl;
-
 }
 
 
@@ -883,18 +836,9 @@ void ObjectGrasping::publishData()
     _msgFilteredWrench.wrench.torque.z = _filteredWrench[k](5);
     _pubFilteredWrench[k].publish(_msgFilteredWrench);
 
-    _msgDesiredWrench.force.x = _Fc[k](0);
-    _msgDesiredWrench.force.y = _Fc[k](1);
-    _msgDesiredWrench.force.z = _Fc[k](2);
-    _msgDesiredWrench.torque.x = _Tc[k](0);
-    _msgDesiredWrench.torque.y = _Tc[k](1);
-    _msgDesiredWrench.torque.z = _Tc[k](2);
-    _pubDesiredWrench[k].publish(_msgDesiredWrench);
-
     std_msgs::Float32 msg;
     msg.data = _normalForce[k];
-    _pubNormalForce[k].publish(msg);
-    
+    _pubNormalForce[k].publish(msg); 
   }
 
   _msgMarker.header.frame_id = "world";
@@ -912,7 +856,7 @@ void ObjectGrasping::updateRobotPose(const geometry_msgs::Pose::ConstPtr& msg, i
   _x[k] << msg->position.x, msg->position.y, msg->position.z;
   _q[k] << msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z;
   _wRb[k] = Utils::quaternionToRotationMatrix(_q[k]);
-  _x[k] = _x[k]+_toolOffset*_wRb[k].col(2);
+  _x[k] = _x[k]+_toolOffsetFromEE*_wRb[k].col(2);
 
   if(k==(int)LEFT)
   {
@@ -955,9 +899,9 @@ void ObjectGrasping::updateRobotWrench(const geometry_msgs::WrenchStamped::Const
 
   if(!_wrenchBiasOK[k] && _firstRobotPose[k])
   {
-    Eigen::Vector3f loadForce = _wRb[k].transpose()*_loadMass*_gravity;
+    Eigen::Vector3f loadForce = _wRb[k].transpose()*_toolMass*_gravity;
     _wrenchBias[k].segment(0,3) -= loadForce;
-    _wrenchBias[k].segment(3,3) -= _loadOffset.cross(loadForce);
+    _wrenchBias[k].segment(3,3) -= _toolComPositionFromSensor.cross(loadForce);
     _wrenchBias[k] += raw; 
     _wrenchCount[k]++;
     if(_wrenchCount[k]==NB_SAMPLES)
@@ -971,9 +915,9 @@ void ObjectGrasping::updateRobotWrench(const geometry_msgs::WrenchStamped::Const
   if(_wrenchBiasOK[k] && _firstRobotPose[k])
   {
     _wrench[k] = raw-_wrenchBias[k];
-    Eigen::Vector3f loadForce = _wRb[k].transpose()*_loadMass*_gravity;
+    Eigen::Vector3f loadForce = _wRb[k].transpose()*_toolMass*_gravity;
     _wrench[k].segment(0,3) -= loadForce;
-    _wrench[k].segment(3,3) -= _loadOffset.cross(loadForce);
+    _wrench[k].segment(3,3) -= _toolComPositionFromSensor.cross(loadForce);
     _filteredWrench[k] = _filteredForceGain*_filteredWrench[k]+(1.0f-_filteredForceGain)*_wrench[k];
   }
 }
@@ -1053,11 +997,9 @@ void ObjectGrasping::optitrackInitialization()
 void ObjectGrasping::dynamicReconfigureCallback(force_based_ds_modulation::objectGrasping_paramsConfig &config, uint32_t level)
 {
   ROS_INFO("Reconfigure request. Updatig the parameters ...");
-
-  _convergenceRate = config.convergenceRate;
   _filteredForceGain = config.filteredForceGain;
   _velocityLimit = config.velocityLimit;
-  _grabbingForceThreshold = config.grabbingForceThreshold;
+  _graspingForceThreshold = config.graspingForceThreshold;
   _offset(0) = config.xOffset;
   _offset(1) = config.yOffset;
   _offset(2) = config.zOffset;

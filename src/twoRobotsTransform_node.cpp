@@ -6,7 +6,6 @@ int main(int argc, char **argv)
   
   TwoRobotsTransform::Mode mode;
 
-
   if (argc == 3)
   {
     if(std::string(argv[1]) == "-m" && std::string(argv[2]) == "s")

@@ -9,7 +9,7 @@ Workspace::Workspace()
 
 bool Workspace::init() 
 {
-    std::string dataPath = ros::package::getPath(std::string("motion_force_control"))+"/data_workspace/workspace_0.17/";
+    std::string dataPath = ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_workspace/workspace_0.17/";
     std::string pathToMu = dataPath + "LWR_workspace_Model_mu.txt";
     std::string pathToPriors = dataPath + "LWR_workspace_Model_prior.txt";
     std::string pathToSigmas = dataPath + "/LWR_workspace_Model_Sigma.txt";

@@ -12,30 +12,33 @@
 #include "geometry_msgs/Pose.h"
 #include "geometry_msgs/Twist.h"
 #include "geometry_msgs/Quaternion.h"
-
-#include <dynamic_reconfigure/server.h>
-
-#include "geometry_msgs/PointStamped.h"
-#include "nav_msgs/Path.h"
-
-#include "std_msgs/Float32.h"
-#include "visualization_msgs/Marker.h"
 #include "geometry_msgs/WrenchStamped.h"
 #include "geometry_msgs/Wrench.h"
 #include "geometry_msgs/Twist.h"
+#include "geometry_msgs/PointStamped.h"
+#include "nav_msgs/Path.h"
+#include "std_msgs/Float32.h"
+#include "visualization_msgs/Marker.h"
 #include "armadillo"
 #include "svm_grad.h"
 
 #define NB_SAMPLES 50
 #define AVERAGE_COUNT 100
 #define TOTAL_NB_MARKERS 4
+#define DATASET_SIZE 30000
 
 
 class SurfaceLearning 
 {
 	public:
-
+		// Execution mode
+		// COLLECTING_DATA: The user brings the robot end effector with force torque sensor mounted
+		//                  in contact with the surface and swap the surface while applying a bit of force
+		// LEARNING: Learn the surface model using SVM
+		// TESTING: Test the learned model: The z axis of the end effector should align with the normal to the surface
+		//                                  The normal distance is printed in the terminal with the normal vector learned                                     		
 		enum Mode {COLLECTING_DATA = 0, LEARNING = 1, TESTING = 2};
+		// Optitrack makers ID
     enum MarkersID {ROBOT_BASIS = 0, P1 = 1, P2 = 2, P3 = 3};
 
 	private:
@@ -45,174 +48,157 @@ class SurfaceLearning
 		ros::Rate _loopRate;
 		float _dt;
 
-		// Subscribers and publishers declaration
-		ros::Subscriber _subRobotPose;						// Subscribe to robot current pose
-		ros::Subscriber _subRobotTwist;						// Subscribe to robot current pose
-		ros::Subscriber _subForceTorqueSensor;				// Subscribe to robot current pose
-		ros::Subscriber _subOptitrackRobotBasisPose;
-		ros::Subscriber _subOptitrackPlane1Pose;
-		ros::Subscriber _subOptitrackPlane2Pose;
-		ros::Subscriber _subOptitrackPlane3Pose;
+		// Subscribers declaration
+		ros::Subscriber _subRobotPose;												// robot pose
+		ros::Subscriber _subRobotTwist;												// robot twist
+		ros::Subscriber _subForceTorqueSensor;								// force torque sensor
+		ros::Subscriber _subOptitrackPose[TOTAL_NB_MARKERS];	// optitrack markers pose
 
-
-		ros::Publisher _pubDesiredTwist;				// Publish desired twist
-		ros::Publisher _pubDesiredOrientation;  // Publish desired orientation
-		ros::Publisher _pubDesiredWrench;				// Publish desired twist
-		ros::Publisher _pubFilteredWrench;
-		ros::Publisher _pubMarker;
+		// Publishers declaration
+		ros::Publisher _pubDesiredTwist;						// Desired twist to DS-impdedance controller
+		ros::Publisher _pubDesiredOrientation;  		// Desired orientation to DS-impedance controller
+		ros::Publisher _pubFilteredWrench;					// Filtered measured wrench
+		ros::Publisher _pubMarker;						  		// Marker (RVIZ) 
 		
-		// Subsciber and publisher messages declaration
+		// Messages declaration
 		geometry_msgs::Pose _msgRealPose;
 		geometry_msgs::Pose _msgDesiredPose;
 		geometry_msgs::Quaternion _msgDesiredOrientation;
 		geometry_msgs::Twist _msgDesiredTwist;
-		geometry_msgs::Wrench _msgDesiredWrench;
-		geometry_msgs::WrenchStamped _msgFilteredWrench;
+		visualization_msgs::Marker _msgMarker;
 		visualization_msgs::Marker _msgArrowMarker;
+    geometry_msgs::WrenchStamped _msgFilteredWrench;
 
-		// Tool variables
-		float _loadMass;
-		float _toolOffset;
-		Eigen::Vector3f _loadOffset;
-		Eigen::Vector3f _gravity;
+		// Tool characteristics
+		float _toolMass;														// Tool mass [kg]
+		float _toolOffsetFromEE;										// Tool offset along z axis of end effector [m]							
+		Eigen::Vector3f _toolComPositionFromSensor; // Offset of the tool [m]	(3x1)
+		Eigen::Vector3f _gravity;										// Gravity vector [m/s^2] (3x1)
 
-		// End effector state variables
-		Eigen::Vector3f _x;				// Current position [m] (3x1)
-		Eigen::Vector4f _q;				// Current end effector quaternion (4x1)
-		Eigen::Matrix3f _wRb;				// Current rotation matrix [m] (3x1)
-		Eigen::Vector3f _v;
-		Eigen::Vector3f _w;
-		Eigen::Matrix<float,6,1> _wrench;
-		Eigen::Matrix<float,6,1> _wrenchBias;
-		Eigen::Matrix<float,6,1> _filteredWrench;
-		float _filteredForceGain;
-		int _wrenchCount = 0;
-		float _normalDistance;
+		// Tool state variables
+		Eigen::Vector3f _x;													// Position [m] (3x1)
+		Eigen::Vector4f _q;													// Quaternion (4x1)
+		Eigen::Matrix3f _wRb;												// Orientation matrix (3x1)
+		Eigen::Vector3f _v;													// Velocity [m/s] (3x1)
+		Eigen::Vector3f _w;													// Angular velocity [rad/s] (3x1)
+		Eigen::Matrix<float,6,1> _wrench;						// Wrench [N and Nm] (6x1)
+		Eigen::Matrix<float,6,1> _wrenchBias;				// Wrench bias [N and Nm] (6x1)
+		Eigen::Matrix<float,6,1> _filteredWrench;		// Filtered wrench [N and Nm] (6x1)
+    float _normalDistance;											// Normal distance to the surface [m]
+    float _normalForce;													// Normal force to the surface [N]
 
-		// End effector desired variables
-		Eigen::Vector4f _qd;				// Desired end effector quaternion (4x1)
-		Eigen::Vector3f _omegad;		// Desired angular velocity [rad/s] (3x1)
+		// Tool control variables
 		Eigen::Vector3f _xd;				// Desired position [m] (3x1)
-		Eigen::Vector3f _vd;				// Desired velocity [m/s] (3x1)
-		Eigen::Vector3f _e1;
-		Eigen::Vector3f _e2;
-		Eigen::Vector3f _e3;
-		Eigen::Vector3f _xAttractor;
-		float _lambda1;
-		float _Fd;
-		float _forceThreshold;
+		Eigen::Vector4f _qd;				// Desired quaternion (4x1)
+		Eigen::Vector3f _omegad;		// Desired angular velocity [rad/s] (3x1)
+		Eigen::Vector3f _vd;				// Desired modulated velocity [m/s] (3x1)
+		float _targetForce;					// Target force in contact [N]
+		float _targetVelocity;			// Velocity norm of the nominal DS [m/s]
+		float _Fd;									// Desired force profile
 
-		float _C;
-		float _sigma;
-		float _epsilonTube;
+		// Task variables
+    Eigen::Vector3f _planeNormal;					// Normal vector to the surface (pointing outside the surface) (3x1)
+    Eigen::Vector3f _e1;									// Normal vector to the surface (pointing towards the surface) (3x1)
 
-
-		// Control variables
-    float _convergenceRate;       // Convergence rate of the DS
-		Eigen::Vector3f _Fc;
-		
     // Booleans
-		bool _firstRobotPose;	// Monitor the first robot pose update
-		bool _firstRobotTwist;	// Monitor the first robot pose update
-		bool _firstWrenchReceived;
-		bool _wrenchBiasOK;
-  	bool _stop;
-  	bool _processRawData;
-  	bool _useFullData;
-  	bool _useOptitrack;
+		bool _firstRobotPose;																// Monitor the first robot pose update
+		bool _firstRobotTwist;															// Monitor the first robot twist update
+		bool _firstWrenchReceived;													// Monitor first force/torque data update
+    bool _firstOptitrackPose[TOTAL_NB_MARKERS];					// Monitor first optitrack markers update
+		bool _optitrackOK;																	// Check if all markers position is received
+		bool _wrenchBiasOK;																	// Check if computation of force/torque sensor bias is OK
+		bool _stop;																					// Check for CTRL+C
+		bool _useOptitrack;
 
-    bool _firstOptitrackRobotPose;
-    bool _firstOptitrackP1Pose;
-    bool _firstOptitrackP2Pose;
-    bool _firstOptitrackP3Pose;
-		bool _optitrackOK;
+    // Optitrack variables
+    Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition;       // Markers position in optitrack frame
+    Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition0;			// Initial markers position in opittrack frame
+    Eigen::Matrix<uint32_t,TOTAL_NB_MARKERS,1> _markersSequenceID;	// Markers sequence ID
+    Eigen::Matrix<uint16_t,TOTAL_NB_MARKERS,1> _markersTracked;			// Markers tracked state
+		Eigen::Vector3f _p1;																						// First marker position in the robot frame
+		Eigen::Vector3f _p2;																						// Second marker position in the robot frame
+		Eigen::Vector3f _p3;																						// Third marker position in the robot frame
 
-    uint32_t _sequenceID;
+		// SVM parameters
+		float _C;									// C value (penalty factor)
+		float _sigma;							// Width of the gaussian kernel [m]
+		float _epsilonTube;				// Epsilon tube width
+  	bool _generateDataset;		// Generate dataset (input = position in the surface frame / output = normal distance)
+  	bool _addDataOnSurface;		// Add data samples collected on the surface to the dataset
+  	float _forceThreshold;    // Force threshold used to generate the dataset [N]
+  	float _heightThreshold;   // Height threshold used to generate the dataset [m]
+  	float _heightOffset; 			// Height offset used to generate the dataset [m]
 
-		std::string _fileName;
-
-
-		static SurfaceLearning* me;
-		std::mutex _mutex;
-
-
-		std::ofstream _outputFile;
-		std::ifstream _inputFile;
-		SVMGrad _svm;
-		Mode _mode;
-
-		Eigen::Vector3f _vdOrig;
-
-		Eigen::Vector3f _vdR;
-
-		std::vector<Eigen::Vector3f> surfaceData;
-
-    Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition;
-    Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition0;
-    Eigen::Matrix<uint32_t,TOTAL_NB_MARKERS,1> _markersSequenceID;
-    Eigen::Matrix<uint16_t,TOTAL_NB_MARKERS,1> _markersTracked;
+		// Other variables
+		Mode _mode;										// Execution mode
+		SVMGrad _svm;									// SVM gradient object
 		uint32_t _averageCount = 0;
-
-
+		int _wrenchCount = 0;
+		uint32_t _sequenceID;
+		float _filteredForceGain;
+		std::string _fileName;
+		std::ifstream _inputFile;
+		std::ofstream _outputFile;
+		std::mutex _mutex;
+		static SurfaceLearning* me;
 
 
 	public:
 
 		// Class constructor
-		SurfaceLearning(ros::NodeHandle &n, double frequency, std::string fileName, Mode mode, float C, float sigma, float epsilonTube,bool processRawData, bool useFullData);
-
+		SurfaceLearning(ros::NodeHandle &n, double frequency, std::string fileName, 
+			              Mode mode, float C, float sigma, float epsilonTube,
+			              bool generateDataset, bool addDataOnSurface);
+		
+		// Initialize node
 		bool init();
 
+		// Run node
 		void run();
 
-	private:
+	private:		
 		
-	static void stopNode(int sig);
+		// Callback called when CTRL is detected to stop the node
+		static void stopNode(int sig);
 		
+		// Compute command to be sent to the DS-impedance controller
     void computeCommand();
 
+		// Compute desired orientation
 		void computeDesiredOrientation();
 
+		// Learn SVR model
 		void learnSurfaceModel();
 
+	  // Generate input file needed by SVMGrad library from output file generated by libsvm
 		void generateSVMGradModelFile();
     
-    void logData();
+    // Log raw data
+    void collectData();
 
-    void processRawData();
+    // Generate dataset from collected raw data
+    void generateDataset();
 
+    // Publish data to topics
     void publishData();
 
-
-    void updateRobotPose(const geometry_msgs::Pose::ConstPtr& msg);
-
-    void updateRobotTwist(const geometry_msgs::Twist::ConstPtr& msg);
-
-    void updateRobotWrench(const geometry_msgs::WrenchStamped::ConstPtr& msg);
-
+    // Compute inital markers positon
     void optitrackInitialization();
 
-		void updateOptitrackRobotPose(const geometry_msgs::PoseStamped::ConstPtr& msg);
+    // Callback to update the robot pose
+    void updateRobotPose(const geometry_msgs::Pose::ConstPtr& msg);
 
-		void updateOptitrackP1Pose(const geometry_msgs::PoseStamped::ConstPtr& msg);
+    // Callback to update the robot twist
+    void updateRobotTwist(const geometry_msgs::Twist::ConstPtr& msg);
 
-		void updateOptitrackP2Pose(const geometry_msgs::PoseStamped::ConstPtr& msg);
+    // Callback to update the robot wrench (force/torque sensor data)
+    void updateRobotWrench(const geometry_msgs::WrenchStamped::ConstPtr& msg);
 
-		void updateOptitrackP3Pose(const geometry_msgs::PoseStamped::ConstPtr& msg);
+    // Callback to update markers pose from Optitrack
+		void updateOptitrackPose(const geometry_msgs::PoseStamped::ConstPtr& msg, int k); 
 
+		// Check if the marker is tracked
 		uint16_t checkTrackedMarker(float a, float b);
-
-    Eigen::Vector4f quaternionProduct(Eigen::Vector4f q1, Eigen::Vector4f q2);
-
-    Eigen::Matrix3f getSkewSymmetricMatrix(Eigen::Vector3f input);
-
-    Eigen::Vector4f rotationMatrixToQuaternion(Eigen::Matrix3f R);
-
-  	Eigen::Matrix3f quaternionToRotationMatrix(Eigen::Vector4f q);
-
-		void quaternionToAxisAngle(Eigen::Vector4f q, Eigen::Vector3f &axis, float &angle);
-
-  	Eigen::Vector4f slerpQuaternion(Eigen::Vector4f q1, Eigen::Vector4f q2, float t);
 };
 
 
