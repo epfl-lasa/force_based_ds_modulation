@@ -76,7 +76,7 @@ class SurfacePolishing
 		// Tool state variables
 		Eigen::Vector3f _x;													// Position [m] (3x1)
 		Eigen::Vector4f _q;													// Quaternion (4x1)
-		Eigen::Matrix3f _wRb;												// Orientation matrix (3x1)
+		Eigen::Matrix3f _wRb;												// Orientation matrix (3x1) (form end effector to world frame)
 		Eigen::Vector3f _v;													// Velocity [m/s] (3x1)
 		Eigen::Vector3f _w;													// Angular velocity [rad/s] (3x1)
 		Eigen::Matrix<float,6,1> _wrench;						// Wrench [N and Nm] (6x1)
@@ -102,6 +102,7 @@ class SurfacePolishing
     Eigen::Vector3f _e1;									// Normal vector to the surface (pointing towards the surface) (3x1)
     Eigen::Vector3f _p;										// Point on the surface [m] (3x1)
     Eigen::Vector3f _xProj;								// Vertical projection on the surface [m] (3x1)
+    Eigen::Matrix3f _wRs;									// Orientation matrix from surface frame to world frame
     Eigen::Vector3f _xAttractor;  				
 
     // Booleans

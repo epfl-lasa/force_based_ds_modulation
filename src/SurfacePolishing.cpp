@@ -16,7 +16,7 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   me = this;
 
   _gravity << 0.0f, 0.0f, -9.80665f;
-  _toolComPositionFromSensor << 0.0f,0.0f,0.035f;
+  _toolComPositionFromSensor << 0.0f,0.0f,0.02f;
   _toolOffsetFromEE = 0.15f;
   _toolMass = 0.0f;
 
@@ -38,7 +38,8 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _qd.setConstant(0.0f);
 
   _p << 0.0f,0.0f,-0.007f;
-  _taskAttractor << -0.65f, 0.05f, -0.007f;
+  // _taskAttractor << -0.65f, 0.05f, -0.007f;
+  _taskAttractor << -0.6f, 0.1f, 0.4f;
   _planeNormal << 0.0f, 0.0f, 1.0f;
 
   _firstRobotPose = false;
@@ -59,7 +60,7 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _markersSequenceID.setConstant(0);
   _markersTracked.setConstant(0);
 
-  _smax = 3.0f;
+  _smax = 4.0f;
   _s = 0.0f;
   _dW = 0.0f;
 
@@ -187,30 +188,30 @@ bool SurfacePolishing::init()
   signal(SIGINT,SurfacePolishing::stopNode);
 
 
-  ROS_INFO("Filename: %s", _fileName.c_str());
+  ROS_INFO("[SurfacePolishing]: Filename: %s", _fileName.c_str());
 
   _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_polishing/"+_fileName+".txt");
 
 
   if(!_n.getParamCached("/lwr/ds_param/damping_eigval0",_d1))
   {
-    ROS_ERROR("Cannot read first eigen value of passive ds controller");
+    ROS_ERROR("[SurfacePolishing]: Cannot read first eigen value of passive ds controller");
     return false;
   }
 
   if(!_outputFile.is_open())
   {
-    ROS_ERROR("Cannot open data file");
+    ROS_ERROR("[SurfacePolishing]: Cannot open output data file, the data_polishing directory might be missing");
     return false;
   }
 
   if(_surfaceType == PLANAR)
   {
-    ROS_INFO("Surface type: PLANAR");
+    ROS_INFO("[SurfacePolishing]: Surface type: PLANAR");
   }
   else if(_surfaceType == NON_FLAT)
   {
-    ROS_INFO("Surface type: NON_FLAT");
+    ROS_INFO("[SurfacePolishing]: Surface type: NON_FLAT");
 
      std::string modelPath = ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/learned_surface_svmgrad_model.txt";
      _inputFile.open(modelPath);
@@ -227,27 +228,27 @@ bool SurfacePolishing::init()
   }
   else
   {
-    ROS_ERROR("Surface type not recognized");
+    ROS_ERROR("[SurfacePolishing]: Surface type not recognized");
     return false;
   }
 
   if(_targetVelocity>0.0f)
   {
-    ROS_INFO("Target velocity: %f", _targetVelocity);
+    ROS_INFO("[SurfacePolishing]: Target velocity: %f", _targetVelocity);
   }
   else
   {
-    ROS_ERROR("Target velocity should be positive");
+    ROS_ERROR("[SurfacePolishing]: Target velocity should be positive");
     return false;
   }
 
   if(_targetForce>0.0f)
   {
-    ROS_INFO("Target force: %f", _targetForce);
+    ROS_INFO("[SurfacePolishing]: Target force: %f", _targetForce);
   }
   else
   {
-    ROS_ERROR("Target force should be positive");
+    ROS_ERROR("[SurfacePolishing]: Target force should be positive");
     return false;
   }
 
@@ -255,12 +256,12 @@ bool SurfacePolishing::init()
   { 
     // Wait for poses being published
     ros::spinOnce();
-    ROS_INFO("The modulated ds node is ready.");
+    ROS_INFO("[SurfacePolishing]: The modulated ds node is ready.");
     return true;
   }
   else 
   {
-    ROS_ERROR("The ros node has a problem.");
+    ROS_ERROR("[SurfacePolishing]: The ros node has a problem.");
     return false;
   }
 }
@@ -327,14 +328,19 @@ void SurfacePolishing::stopNode(int sig)
 
 void SurfacePolishing::computeCommand()
 {
+  // Update surface info
   updateSurfaceInformation();
 
+  // Compute nominal DS
   computeNominalDS();
 
+  // Update tank scalar variables
   updateTankScalars();
 
+  // Compute modulated DS
   computeModulatedDS();
     
+  // Compute desired orientation
   computeDesiredOrientation();
 }
 
@@ -384,16 +390,27 @@ void SurfacePolishing::updateSurfaceInformation()
       // The surface is learned with respect to a frame defined by the marker P1
       // We get the robot position in the surface frame
       Eigen::Vector3f x;
-      x = _x-(_markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS));
+      _p1 = _markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS);
+      _p2 = _markersPosition.col(P2)-_markersPosition0.col(ROBOT_BASIS);
+      _p3 = _markersPosition.col(P3)-_markersPosition0.col(ROBOT_BASIS);
+
+      // Compute surface frame, wRs is the rotation matrix for the surface frame to the world frame  
+      _wRs.col(0) = (_p1-_p3).normalized();
+      _wRs.col(1) = (_p1-_p2).normalized();
+      _wRs.col(2) = ((_wRs.col(0)).cross(_wRs.col(1))).normalized();
+
+      // Compute robot postion in surface frame
+      x = _wRs.transpose()*(_x-_p1);
 
       // We compute the normal distance by evlauating the SVM model
       _normalDistance = _svm.calculateGamma(x.cast<double>());
 
       // We get the normal vector by evaluating the gradient of the model
       _planeNormal = _svm.calculateGammaDerivative(x.cast<double>()).cast<float>();
+      _planeNormal = _wRs*_planeNormal;
       _planeNormal.normalize();
       _e1 = -_planeNormal;
-       std::cerr << _normalDistance << " " << _e1.transpose() << std::endl;    
+      std::cerr << "[SurfacePolishing]: Normal distance: " << _normalDistance << " Normal vector: " << _e1.transpose() << std::endl;    
 
       break;
     }
@@ -423,16 +440,26 @@ void SurfacePolishing::computeNominalDS()
     _xAttractor = _p1+0.5f*(_p2-_p1)+0.3f*(_p3-_p1);
     _xAttractor(2) = (-_planeNormal(0)*(_xAttractor(0)-_p1(0))-_planeNormal(1)*(_xAttractor(1)-_p1(1))+_planeNormal(2)*_p1(2))/_planeNormal(2);
   }
-  else // TO CHANGE !!! Attractor might change
+  else 
   {
-    _xAttractor = _taskAttractor;
-    _xAttractor += _offset;
-    _xAttractor(2) = (-_planeNormal(0)*(_xAttractor(0)-_p(0))-_planeNormal(1)*(_xAttractor(1)-_p(1))+_planeNormal(2)*_p(2))/_planeNormal(2);
+    _xAttractor = _p1+0.45f*(_p2-_p1)+0.5f*(_p3-_p1);
+    // _xAttractor += _offset;
+
+    // Compute normal distance and vector at the attractor location in the surface frame
+    Eigen::Vector3f x, attractorNormal; 
+    x = _wRs.transpose()*(_xAttractor-_p1);
+
+    float attractorNormalDistance = _svm.calculateGamma(x.cast<double>());
+    attractorNormal = _svm.calculateGammaDerivative(x.cast<double>()).cast<float>();
+    attractorNormal = _wRs*attractorNormal;
+    attractorNormal.normalize();
+
+    // Compute attractor normal projection on the surface int the world frame
+    _xAttractor -= attractorNormalDistance*attractorNormal;
   }
 
   // The reaching velocity direction is aligned with the normal vector to the surface
   Eigen::Vector3f v0 = _targetVelocity*_e1;
-
  
   // Compute normalized circular dynamics projected onto the surface
   Eigen::Vector3f vdContact;
@@ -539,10 +566,6 @@ void SurfacePolishing::updateTankScalars()
   {
     _gammap = _gamma;
   }
-
-
-  std::cerr << "alpha: " << _alpha << " beta: " << _beta << " gamma: " << _gamma << " gammap: " << _gammap << std::endl;
-
 }
 
 
@@ -612,8 +635,10 @@ void SurfacePolishing::computeModulatedDS()
   // Compute modulated DS
   _vd = la*_fx+_Fd*_e1/_d1;
 
-  std::cerr <<"Measured force: " << _normalForce << " Fd:  " << _Fd*_d1 << " ||fx||: " << _fx.norm() << std::endl;
-  std::cerr << "delta: " << delta << " la: " << la << " vd: " << _vd.norm() << std::endl;
+  std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd:  " << _Fd << " ||fx||: " << _fx.norm() << std::endl;
+  std::cerr << "[SurfacePolishing]: la: " << la << " vd: " << _vd.norm() << std::endl;
+  std::cerr << "[SurfacePolishing]: Tank: " << _s  <<" dW: " << _dW <<std::endl;
+
 
   // Bound modulated DS for safety 
   if(_vd.norm()>_velocityLimit)
@@ -621,7 +646,7 @@ void SurfacePolishing::computeModulatedDS()
     _vd *= _velocityLimit/_vd.norm();
   }
 
-  std::cerr << "vd after scaling: " << _vd.norm() << " distance: " << _normalDistance << " v: " << _v.segment(0,3).norm() <<std::endl;
+  std::cerr << "[SurfacePolishing]: vd after scaling: " << _vd.norm() << " distance: " << _normalDistance << " v: " << _v.segment(0,3).norm() <<std::endl;
 }
 
 
@@ -847,7 +872,7 @@ void SurfacePolishing::updateRobotWrench(const geometry_msgs::WrenchStamped::Con
     {
       _wrenchBias /= NB_SAMPLES;
       _wrenchBiasOK = true;
-      std::cerr << "Bias: " << _wrenchBias.transpose() << std::endl;
+      std::cerr << "[SurfacePolishing]: Bias: " << _wrenchBias.transpose() << std::endl;
     }
   }
 
@@ -871,14 +896,14 @@ void SurfacePolishing::optitrackInitialization()
       _markersPosition0 = (_averageCount*_markersPosition0+_markersPosition)/(_averageCount+1);
       _averageCount++;
     }
-    std::cerr << "Optitrack Initialization count: " << _averageCount << std::endl;
+    std::cerr << "[SurfacePolishing]: Optitrack Initialization count: " << _averageCount << std::endl;
     if(_averageCount == 1)
     {
-      ROS_INFO("Optitrack Initialization starting ...");
+      ROS_INFO("[SurfacePolishing]: Optitrack Initialization starting ...");
     }
     else if(_averageCount == AVERAGE_COUNT)
     {
-      ROS_INFO("Optitrack Initialization done !");
+      ROS_INFO("[SurfacePolishing]: Optitrack Initialization done !");
     }
   }
   else
