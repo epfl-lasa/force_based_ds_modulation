@@ -99,6 +99,7 @@ class SurfaceLearning
 		// Task variables
     Eigen::Vector3f _planeNormal;					// Normal vector to the surface (pointing outside the surface) (3x1)
     Eigen::Vector3f _e1;									// Normal vector to the surface (pointing towards the surface) (3x1)
+    Eigen::Matrix3f _wRs;									// Orientation matrix from surface frame to world frame
 
     // Booleans
 		bool _firstRobotPose;																// Monitor the first robot pose update
@@ -108,7 +109,6 @@ class SurfaceLearning
 		bool _optitrackOK;																	// Check if all markers position is received
 		bool _wrenchBiasOK;																	// Check if computation of force/torque sensor bias is OK
 		bool _stop;																					// Check for CTRL+C
-		bool _useOptitrack;
 
     // Optitrack variables
     Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition;       // Markers position in optitrack frame

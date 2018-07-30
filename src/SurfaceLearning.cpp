@@ -20,8 +20,8 @@ SurfaceLearning::SurfaceLearning(ros::NodeHandle &n, double frequency, std::stri
   me = this;
 
   _gravity << 0.0f, 0.0f, -9.80665f;
-  _toolComPositionFromSensor << 0.0f,0.0f,0.035f;
-  _toolOffsetFromEE = 0.14f;
+  _toolComPositionFromSensor << 0.0f,0.0f,0.02f;
+  _toolOffsetFromEE = 0.15f;
   _toolMass = 0.1f;
 
   _x.setConstant(0.0f);
@@ -45,12 +45,11 @@ SurfaceLearning::SurfaceLearning(ros::NodeHandle &n, double frequency, std::stri
   _firstWrenchReceived = false;
   for(int k = 0; k < TOTAL_NB_MARKERS; k++)
   {
-    _firstOptitrackPose[k] = true;
+    _firstOptitrackPose[k] = false;
   }
   _wrenchBiasOK = false;
   _stop = false;
   _optitrackOK = false;
-  _useOptitrack = true;
 
 
   _markersPosition.setConstant(0.0f);
@@ -112,28 +111,28 @@ bool SurfaceLearning::init()
 
   signal(SIGINT,SurfaceLearning::stopNode);
 
-  ROS_INFO("Filename: %s", _fileName.c_str());
+  ROS_INFO("[SurfaceLearning]: Filename: %s", _fileName.c_str());
 
   if(_mode == COLLECTING_DATA)
   {
-    ROS_INFO("Mode: COLLECTING_DATA");
+    ROS_INFO("[SurfaceLearning]: Mode: COLLECTING_DATA");
   }
   else if(_mode == LEARNING)
   {
-    ROS_INFO("Mode: LEARNING");
-    ROS_INFO("C: %f", _C);
-    ROS_INFO("Sigma: %f", _sigma);
-    ROS_INFO("Epsilon tube: %f", _epsilonTube);
-    ROS_INFO("Process raw data: %d", _generateDataset);
-    ROS_INFO("Use full data: %d", _addDataOnSurface);
+    ROS_INFO("[SurfaceLearning]: Mode: LEARNING");
+    ROS_INFO("[SurfaceLearning]: C: %f", _C);
+    ROS_INFO("[SurfaceLearning]: Sigma: %f", _sigma);
+    ROS_INFO("[SurfaceLearning]: Epsilon tube: %f", _epsilonTube);
+    ROS_INFO("[SurfaceLearning]: Generate dataset on surface: %d", _generateDataset);
+    ROS_INFO("[SurfaceLearning]: Use data on surface: %d", _addDataOnSurface);
   }
   else if(_mode == TESTING)
   {
-    ROS_INFO("Mode: TESTING");
+    ROS_INFO("[SurfaceLearning]: Mode: TESTING");
   }
   else
   {
-    ROS_ERROR("Mode not recognized");
+    ROS_ERROR("[SurfaceLearning]: Mode not recognized");
     return false;
   }
 
@@ -143,7 +142,7 @@ bool SurfaceLearning::init()
     _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_raw_data.txt");
     if(!_outputFile.is_open())
     {
-      ROS_ERROR("Cannot open data file");
+      ROS_ERROR("[SurfaceLearning]: Cannot open raw data file, the data_surface folder might be missing");
       return false;
     } 
   }
@@ -158,7 +157,7 @@ bool SurfaceLearning::init()
     _inputFile.open(modelPath);
     if(!_inputFile.is_open())
     {
-      ROS_ERROR("Cannot svmgrad model model file");
+      ROS_ERROR("[SurfaceLearning]: Cannot svmgrad model model file");
       return false;
     }
     else
@@ -172,12 +171,12 @@ bool SurfaceLearning::init()
   { 
     // Wait for poses being published
     ros::spinOnce();
-    ROS_INFO("The modulated ds node is ready.");
+    ROS_INFO("[SurfaceLearning]: The modulated ds node is ready.");
     return true;
   }
   else 
   {
-    ROS_ERROR("The ros node has a problem.");
+    ROS_ERROR("[SurfaceLearning]: The ros node has a problem.");
     return false;
   }
 }
@@ -187,9 +186,9 @@ void SurfaceLearning::run()
 {
   while (!_stop) 
   {
-    // if(_firstRobotPose && _firstRobotTwist && _wrenchBiasOK &&
-    //    _firstOptitrackPose[ROBOT_BASIS] && _firstOptitrackPose[P1] &&
-    //    _firstOptitrackPose[P2] && _firstOptitrackPose[P3])
+    if(_firstRobotPose && _firstRobotTwist && _wrenchBiasOK &&
+       _firstOptitrackPose[ROBOT_BASIS] && _firstOptitrackPose[P1] &&
+       _firstOptitrackPose[P2] && _firstOptitrackPose[P3])
     {
       _mutex.lock();
 
@@ -275,37 +274,44 @@ void SurfaceLearning::stopNode(int sig)
 
 void SurfaceLearning::computeCommand()
 {
+  // The three markers are positioned on the surface to form an angle of 90 deg:
+  // P1 ----- P2
+  // |       
+  // |
+  // P3
+  // Compute markers position in the robot frame
+  _p1 = _markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS);
+  _p2 = _markersPosition.col(P2)-_markersPosition0.col(ROBOT_BASIS);
+  _p3 = _markersPosition.col(P3)-_markersPosition0.col(ROBOT_BASIS);
+
+  // Compute surface frame, wRs is the rotation matrix for the surface frame to the world frame  
+  _wRs.col(0) = (_p1-_p3).normalized();
+  _wRs.col(1) = (_p1-_p2).normalized();
+  _wRs.col(2) = ((_wRs.col(0)).cross(_wRs.col(1))).normalized();
 
   if(_mode == TESTING)
   {
-    _svm.preComputeKernel(true);
-    
+    // Compute robot postion in surface frame
     Eigen::Vector3f x;
-    if(_useOptitrack)
-    {
-      // The surface is learned with respect to a frame defined by the marker P1
-      // We get the robot position in the surface frame
-      x = _x-(_markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS));
-    }
-    else
-    {
-      x = _x;
-    }
-
+    x = _wRs.transpose()*(_x-_p1);
+    
+    _svm.preComputeKernel(true);
     // We compute the normal distance by evlauating the SVM model
-    std::cerr << x.transpose() << std::endl;
     _normalDistance = _svm.calculateGamma(x.cast<double>());
 
       // We get the normal vector by evaluating the gradient of the model
     _e1 = -_svm.calculateGammaDerivative(x.cast<double>()).cast<float>();
+    _e1 = _wRs*_e1;
     _e1.normalize();
-    std::cerr << _normalDistance << " " << _e1.transpose() << std::endl;    
+    std::cerr << " [SurfaceLearning]: Normal distance: " << _normalDistance << " Normal vector: " << _e1.transpose() << std::endl;  
+
     if(_normalDistance<0.0f)
     {
       _normalDistance = 0.0f;
     }
   }
 
+  // Compute desired orientation
   computeDesiredOrientation();
 }
 
@@ -366,17 +372,10 @@ void SurfaceLearning::computeDesiredOrientation()
 
 void SurfaceLearning::collectData()
 {
-
+  // Compute robot postion in surface frame
   Eigen::Vector3f x;
-  if(_useOptitrack)
-  {
-    x = _x-(_markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS));
-  }
-  else
-  {
-    x = _x;
-  }
-
+  x = _wRs.transpose()*(_x-_p1);
+    
   // Write data to file
   _outputFile << ros::Time::now() << " "
               << x.transpose() << " "
@@ -388,138 +387,138 @@ void SurfaceLearning::collectData()
 
 void SurfaceLearning::generateDataset()
 {
-    _inputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_raw_data.txt");
-    
-    if(!_inputFile.is_open())
+  _inputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_raw_data.txt");
+  
+  if(!_inputFile.is_open())
+  {
+    ROS_ERROR("[SurfaceLearning]: Cannot open raw data file");
+  }
+
+  std::string line;
+  double timeTemp;
+  Eigen::Vector3f position,velocity,force;
+  uint32_t sequenceID;
+
+  std::vector<Eigen::Vector3f> dataOnSurface;
+
+  // Read raw data file to extract data on the surface from it
+  while(std::getline(_inputFile,line))  
+  {
+    std::stringstream ss;
+    ss << line;
+    ss >> timeTemp >> position(0) >> position(1) >> position(2) >> 
+                      velocity(0) >> velocity(1) >> velocity(2) >>
+                      force(0) >> force(1) >> force(2) >> sequenceID;
+
+    // The datapoints extracted are the ones with low height and with enough contact force measured
+    if(force.norm()>_forceThreshold && position(2) <= _heightThreshold)
     {
-      ROS_ERROR("Cannot open raw data file");
+      dataOnSurface.push_back(position);
     }
+  }
 
-    std::string line;
-    double timeTemp;
-    Eigen::Vector3f position,velocity,force;
-    uint32_t sequenceID;
+  ROS_INFO("[SurfaceLearning]: Input data size: %d", (uint32_t) dataOnSurface.size());
 
-    std::vector<Eigen::Vector3f> dataOnSurface;
+  // Copy data on surface on an eigen object for easier manipulation
+  Eigen::Matrix<float,Eigen::Dynamic,3, Eigen::RowMajor> Xs;
+  Xs.resize(dataOnSurface.size(),3);
+  memcpy(Xs.data(),dataOnSurface.data(),dataOnSurface.size()*sizeof(Eigen::Vector3f));
 
-    // Read raw data file to extract data on the surface from it
-    while(std::getline(_inputFile,line))  
+  // Get min/max position on the surface for each dimension
+  Eigen::Vector3f XsMin, XsMax;
+  for(int k = 0; k< 3; k++)
+  {
+    XsMin(k) = Xs.col(k).array().minCoeff();
+    XsMax(k) = Xs.col(k).array().maxCoeff();
+  }
+
+  std::cerr << "[SurfaceLearning]: Min position (for each dimension): " << XsMin.transpose() << std::endl;
+  std::cerr << "[SurfaceLearning]: Max position (for each dimension): " << XsMax.transpose() << std::endl;
+
+  // Generate random number between 0 and 1
+  srand(time(NULL));
+  Eigen::Matrix<float,Eigen::Dynamic,3> R;
+  R.resize(DATASET_SIZE,3);
+  R.setRandom();
+  R.array()+= 1.0f;
+  R.array()/=2.0f;
+
+  //////////////////////
+  // Generate dataset //
+  //////////////////////
+  // The first three colum are the x,y,z position, the last one is the normal distance
+
+  // Start with input data by generating points below/above the surface
+  // from the random numbers generated
+  Eigen::MatrixXf dataset;
+  dataset.resize(DATASET_SIZE,4);
+  for(int k = 0; k< 3; k++)
+  {
+    if(k == 2)
     {
-      std::stringstream ss;
-      ss << line;
-      ss >> timeTemp >> position(0) >> position(1) >> position(2) >> 
-                        velocity(0) >> velocity(1) >> velocity(2) >>
-                        force(0) >> force(1) >> force(2) >> sequenceID;
-
-      // The datapoints extracted are the ones with low height and with enough contact force measured
-      if(force.norm()>_forceThreshold && position(2) <= _heightThreshold)
-      {
-        dataOnSurface.push_back(position);
-      }
-    }
-
-    ROS_INFO("Input data size: %d", (uint32_t) dataOnSurface.size());
-
-    // Copy data on surface on an eigen object for easier manipulation
-    Eigen::Matrix<float,Eigen::Dynamic,3, Eigen::RowMajor> Xs;
-    Xs.resize(dataOnSurface.size(),3);
-    memcpy(Xs.data(),dataOnSurface.data(),dataOnSurface.size()*sizeof(Eigen::Vector3f));
-
-    // Get min/max position on the surface for each dimension
-    Eigen::Vector3f XsMin, XsMax;
-    for(int k = 0; k< 3; k++)
-    {
-      XsMin(k) = Xs.col(k).array().minCoeff();
-      XsMax(k) = Xs.col(k).array().maxCoeff();
-    }
-
-    std::cerr << "Min position (for each dimension): " << XsMin.transpose() << std::endl;
-    std::cerr << "Max position (for each dimension): " << XsMax.transpose() << std::endl;
-
-    // Generate random number between 0 and 1
-    srand(time(NULL));
-    Eigen::Matrix<float,Eigen::Dynamic,3> R;
-    R.resize(DATASET_SIZE,3);
-    R.setRandom();
-    R.array()+= 1.0f;
-    R.array()/=2.0f;
-
-    //////////////////////
-    // Generate dataset //
-    //////////////////////
-    // The first three colum are the x,y,z position, the last one is the normal distance
-
-    // Start with input data by generating points below/above the surface
-    // from the random numbers generated
-    Eigen::MatrixXf dataset;
-    dataset.resize(DATASET_SIZE,4);
-    for(int k = 0; k< 3; k++)
-    {
-      if(k == 2)
-      {
-        dataset.col(k).array() = XsMin(k)+(XsMax(k)+_heightOffset-XsMin(k))*R.col(k).array();
-      }
-      else
-      {
-        dataset.col(k).array() = XsMin(k)+(XsMax(k)-XsMin(k))*R.col(k).array();
-      }
-    }
-
-    // Compute the output label for each datapoint (= approximated normal distance)
-    Eigen::Matrix<float,Eigen::Dynamic,1>  outputIndex;
-    outputIndex.resize(dataset.rows());
-
-    Eigen::VectorXf::Index index;
-    for(uint32_t k = 0; k < dataset.rows(); k++)
-    {
-      dataset(k,3) = (dataset.row(k).segment(0,3).replicate(Xs.rows(),1)-Xs).rowwise().norm().array().minCoeff(&index);
-      outputIndex(k) = index; 
-      if(dataset(k,2)-Xs(index,2)<0.0f)
-      {
-        dataset(k,3) = -dataset(k,3);
-      }
-    }
-
-    _inputFile.close();
-
-    // Add data on surface to form the full dataset
-    Eigen::MatrixXf datasetFull;
-    datasetFull.resize(DATASET_SIZE+Xs.rows(),4);
-    datasetFull.setConstant(0.0f);
-    datasetFull.block(0,0,DATASET_SIZE,4) = dataset;
-    datasetFull.block(DATASET_SIZE,0,Xs.rows(),3) = Xs;
-
-    _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_libsvm_data.txt");
-
-    // Write dataset file to be used by SVM
-    if(!_outputFile.is_open())
-    {
-      ROS_ERROR("Cannot open libsvm data file");
-    }
-
-    if(_addDataOnSurface)
-    {
-      for(uint32_t k = 0; k < datasetFull.rows(); k++)
-      {
-        _outputFile << datasetFull(k,3) << " 1:" << datasetFull(k,0) << " 2:" << datasetFull(k,1) << " 3:" << datasetFull(k,2) << std::endl;
-      }
+      dataset.col(k).array() = XsMin(k)+(XsMax(k)+_heightOffset-XsMin(k))*R.col(k).array();
     }
     else
     {
-      for(uint32_t k = 0; k < dataset.rows(); k++)
-      {
-        _outputFile << dataset(k,3) << " 1:" << dataset(k,0) << " 2:" << dataset(k,1) << " 3:" << dataset(k,2) << std::endl;
-      }
+      dataset.col(k).array() = XsMin(k)+(XsMax(k)-XsMin(k))*R.col(k).array();
     }
+  }
 
-    _outputFile.close();
+  // Compute the output label for each datapoint (= approximated normal distance)
+  Eigen::Matrix<float,Eigen::Dynamic,1>  outputIndex;
+  outputIndex.resize(dataset.rows());
+
+  Eigen::VectorXf::Index index;
+  for(uint32_t k = 0; k < dataset.rows(); k++)
+  {
+    dataset(k,3) = (dataset.row(k).segment(0,3).replicate(Xs.rows(),1)-Xs).rowwise().norm().array().minCoeff(&index);
+    outputIndex(k) = index; 
+    if(dataset(k,2)-Xs(index,2)<0.0f)
+    {
+      dataset(k,3) = -dataset(k,3);
+    }
+  }
+
+  _inputFile.close();
+
+  // Add data on surface to form the full dataset
+  Eigen::MatrixXf datasetFull;
+  datasetFull.resize(DATASET_SIZE+Xs.rows(),4);
+  datasetFull.setConstant(0.0f);
+  datasetFull.block(0,0,DATASET_SIZE,4) = dataset;
+  datasetFull.block(DATASET_SIZE,0,Xs.rows(),3) = Xs;
+
+  _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_libsvm_data.txt");
+
+  // Write dataset file to be used by SVM
+  if(!_outputFile.is_open())
+  {
+    ROS_ERROR("[SurfaceLearning]: Cannot open libsvm data file");
+  }
+
+  if(_addDataOnSurface)
+  {
+    for(uint32_t k = 0; k < datasetFull.rows(); k++)
+    {
+      _outputFile << datasetFull(k,3) << " 1:" << datasetFull(k,0) << " 2:" << datasetFull(k,1) << " 3:" << datasetFull(k,2) << std::endl;
+    }
+  }
+  else
+  {
+    for(uint32_t k = 0; k < dataset.rows(); k++)
+    {
+      _outputFile << dataset(k,3) << " 1:" << dataset(k,0) << " 2:" << dataset(k,1) << " 3:" << dataset(k,2) << std::endl;
+    }
+  }
+
+  _outputFile.close();
 }
 
 
 
 void SurfaceLearning::learnSurfaceModel()
 {
-  ROS_INFO("Learning surface model ...");
+  ROS_INFO("[SurfaceLearning]: Learning surface model ...");
   std::string command;
 
   // Dataset input file
@@ -528,26 +527,26 @@ void SurfaceLearning::learnSurfaceModel()
   // Model output file
   std::string modelFile = ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_libsvm_model.txt";
   float gamma = 1.0f/(2.0f*std::pow(_sigma,2.0f));
-  ROS_INFO("Gamma value computed from sigma: %f", gamma);
+  ROS_INFO("[SurfaceLearning]: Gamma value computed from sigma: %f", gamma);
 
   // Call SVM command
   std::string svmCommand = "svm-train -s 3 -t 2 -c "+std::to_string(_C)+" -g "+std::to_string(gamma)+" -h 0 -p "+std::to_string(_epsilonTube);
   command = svmCommand+" "+dataFile+" "+modelFile;
-  ROS_INFO("SVM command: %s", command.c_str());
+  ROS_INFO("[SurfaceLearning]: SVM command: %s", command.c_str());
   int val = std::system(command.c_str());
-  ROS_INFO("libsvm command result: %d", val);
+  ROS_INFO("[SurfaceLearning]: libsvm command result: %d", val);
 
   generateSVMGradModelFile();
 }
 
 void SurfaceLearning::generateSVMGradModelFile()
 {
-  ROS_INFO("Generate svm grad model file ...");
+  ROS_INFO("[SurfaceLearning]: Generate svm grad model file ...");
   std::string command;
   _inputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_libsvm_model.txt");
   if(!_inputFile.is_open())
   {
-    ROS_ERROR("Cannot open libsvm model file");
+    ROS_ERROR("[SurfaceLearning]: Cannot open libsvm model file");
   }
 
   std::string modelType, kernelType;
@@ -584,19 +583,19 @@ void SurfaceLearning::generateSVMGradModelFile()
       sscanf(line.c_str(),"%f 1:%f 2:%f 3:%f", &alpha(k),&sv(k,0),&sv(k,1),&sv(k,2));
     }
   }
-  ROS_INFO("svm_type %s", modelType.c_str());
-  ROS_INFO("kernel_type %s", kernelType.c_str());
-  ROS_INFO("gamma %f", gamma);
-  ROS_INFO("nr_class %d", nbClasses);
-  ROS_INFO("total_sv %d", nbSVs);
-  ROS_INFO("rho %f",rho);
+  ROS_INFO("[SurfaceLearning]: svm_type %s", modelType.c_str());
+  ROS_INFO("[SurfaceLearning]: kernel_type %s", kernelType.c_str());
+  ROS_INFO("[SurfaceLearning]: gamma %f", gamma);
+  ROS_INFO("[SurfaceLearning]: nr_class %d", nbClasses);
+  ROS_INFO("[SurfaceLearning]: total_sv %d", nbSVs);
+  ROS_INFO("[SurfaceLearning]: rho %f",rho);
 
   _inputFile.close();
 
   _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_surface/"+_fileName+"_svmgrad_model.txt");
   if(!_outputFile.is_open())
   {
-    ROS_ERROR("Cannot open svnm grad model file");
+    ROS_ERROR("[SurfaceLearning]: Cannot open svnm grad model file");
   }
   else
   {
@@ -677,7 +676,7 @@ void SurfaceLearning::updateRobotPose(const geometry_msgs::Pose::ConstPtr& msg)
     _sequenceID++;
     if(_mode == COLLECTING_DATA && _wrenchBiasOK)
     {
-      std::cerr << _sequenceID << std::endl;
+      std::cerr << "[SurfaceLearning]: " << "datapoint ID: " <<_sequenceID << std::endl;
     }
   }
 
@@ -750,14 +749,14 @@ void SurfaceLearning::optitrackInitialization()
       _markersPosition0 = (_averageCount*_markersPosition0+_markersPosition)/(_averageCount+1);
       _averageCount++;
     }
-    std::cerr << "Optitrack Initialization count: " << _averageCount << std::endl;
+    std::cerr << "[SurfaceLearning]: Optitrack Initialization count: " << _averageCount << std::endl;
     if(_averageCount == 1)
     {
-      ROS_INFO("Optitrack Initialization starting ...");
+      ROS_INFO("[SurfaceLearning]: Optitrack Initialization starting ...");
     }
     else if(_averageCount == AVERAGE_COUNT)
     {
-      ROS_INFO("Optitrack Initialization done !");
+      ROS_INFO("[SurfaceLearning]: Optitrack Initialization done !");
     }
   }
   else
