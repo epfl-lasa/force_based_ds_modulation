@@ -57,12 +57,12 @@ bool TwoRobotsTransform::init()
 	if (_n.ok()) 
 	{ 
 		ros::spinOnce();
-		ROS_INFO("The TwoRobotsTransform is about to start");
+		ROS_INFO("[TwoRobotsTransform]: The node is about to start");
 		return true;
 	}
 	else 
 	{
-		ROS_ERROR("The ros node has a problem.");
+		ROS_ERROR("[TwoRobotsTransform]: The node has a problem.");
 		return false;
 	}
 }
@@ -141,19 +141,19 @@ void TwoRobotsTransform::optitrackInitialization()
       _markersPosition0 = (_averageCount*_markersPosition0+_markersPosition)/(_averageCount+1);
       _averageCount++;
     }
-    std::cerr << "Optitrack Initialization count: " << _averageCount << std::endl;
+    std::cerr << "[TwoRobotsTransform]: Optitrack Initialization count: " << _averageCount << std::endl;
     if(_averageCount == 1)
     {
-      ROS_INFO("Optitrack Initialization starting ...");
+      ROS_INFO("[TwoRobotsTransform]: Optitrack Initialization starting ...");
     }
     else if(_averageCount == AVERAGE_COUNT)
     {
-      ROS_INFO("Optitrack Initialization done !");
+      ROS_INFO("[TwoRobotsTransform]: Optitrack Initialization done !");
 
       Eigen::Vector3f temp = _markersPosition0.col(LEFT)-_markersPosition0.col(RIGHT);
       tf::Vector3 origin(temp(0),temp(1),temp(2));
 
-      ROS_INFO("Transform robot left to right: x: %f y: %f z: %f", temp(0), temp(1), temp(2));
+      ROS_INFO("[TwoRobotsTransform]: Transform robot left to right: x: %f y: %f z: %f", temp(0), temp(1), temp(2));
       _transform.setOrigin(origin);
       _transform.setRotation(tf::Quaternion(0.0f, 0.0f, 0.0f, 1.0f));
     }
