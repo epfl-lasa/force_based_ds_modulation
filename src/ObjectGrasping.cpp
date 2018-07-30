@@ -176,7 +176,7 @@ bool ObjectGrasping::init()
   _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_grasping/"+_filename+".txt");
   if(!_outputFile.is_open())
   {
-    ROS_ERROR("Cannot open data file");
+    ROS_ERROR("Cannot open output data file, the data_grasping directory might be missing");
     return false;
   }
 
@@ -395,7 +395,7 @@ void ObjectGrasping::isObjectReachable()
     _objectReachable = false;
   }
 
-  std::cerr << "Reachable: " << (int) _objectReachable << " " << (int) l << " " << (int) r << " " << _markersTracked.segment(NB_ROBOTS,TOTAL_NB_MARKERS-NB_ROBOTS).sum() << std::endl;
+  std::cerr << "[ObjectGrasping]: Reachable: " << (int) _objectReachable << " left: " << (int) l << " right: " << (int) r << " object: " << _markersTracked.segment(NB_ROBOTS,TOTAL_NB_MARKERS-NB_ROBOTS).sum() << std::endl;
 }
 
 
@@ -431,7 +431,7 @@ void ObjectGrasping::computeNominalDS()
   {
     if(_objectGrasped == false)
     {
-      ROS_INFO("Object grabbed");
+      std::cerr << "[ObjectGrasping]: Object grasped" << std::endl; 
     }
     _objectGrasped = true;
   }
@@ -492,8 +492,9 @@ void ObjectGrasping::computeNominalDS()
   _eD = (_xD-_xdD).dot(_xdD.normalized());
   _eC = (_xdC-_xC).norm();
 
-  std::cerr << "Reachable: " << (int) _objectReachable << " eD: " << _eD << " eC: " <<  _eC << std::endl;
-  std::cerr << "FL: " << _normalForce[LEFT] << " FR: " <<  _normalForce[RIGHT] << std::endl;
+  std::cerr <<"[ObjectGrasping]: goHome: " << (int) _goHome << std::endl;
+  std::cerr << "[ObjectGrasping]: Reachable: " << (int) _objectReachable << " eD: " << _eD << " eC: " <<  _eC << std::endl;
+  std::cerr << "[ObjectGrasping]: FL: " << _normalForce[LEFT] << " FR: " <<  _normalForce[RIGHT] << std::endl;
 
   if(_eD<0.0f)
   {
@@ -687,8 +688,8 @@ void ObjectGrasping::computeModulatedDS()
     _vd[k] = la*_fx[k]+_Fd[k]*_e1[k]/_d1[k];
     _vd[k]+=_vdC;
 
-    std::cerr << k << ": Fd: " << _Fd[k] << " delta: " << delta << " la: " << la << " vdr.dot(e1) " << _e1[k].dot(_fx[k]) << std::endl;
-    std::cerr << k << " Tank: " << _s[k]  <<" dW: " << _dW[k] <<std::endl;
+    std::cerr << "[ObjectGrasping]: Robot " << k << ": Fd: " << _Fd[k] << " delta: " << delta << " la: " << la << " vdr.dot(e1) " << _e1[k].dot(_fx[k]) << std::endl;
+    std::cerr << "[ObjectGrasping]: Robot " << k << ": Tank: " << _s[k]  <<" dW: " << _dW[k] <<std::endl;
 
     // Bound desired velocity for safety
     if(_vd[k].norm()>_velocityLimit)
@@ -908,7 +909,7 @@ void ObjectGrasping::updateRobotWrench(const geometry_msgs::WrenchStamped::Const
     {
       _wrenchBias[k] /= NB_SAMPLES;
       _wrenchBiasOK[k] = true;
-      std::cerr << "Bias " << k << ": " <<_wrenchBias[k].transpose() << std::endl;
+      std::cerr << "[ObjectGrasping]: Bias " << k << ": " <<_wrenchBias[k].transpose() << std::endl;
     }
   }
 
@@ -976,14 +977,14 @@ void ObjectGrasping::optitrackInitialization()
       _markersPosition0 = (_averageCount*_markersPosition0+_markersPosition)/(_averageCount+1);
       _averageCount++;
     }
-    std::cerr << "Optitrack Initialization count: " << _averageCount << std::endl;
+    std::cerr << "[ObjectGrasping]: Optitrack Initialization count: " << _averageCount << std::endl;
     if(_averageCount == 1)
     {
-      ROS_INFO("Optitrack Initialization starting ...");
+      ROS_INFO("[ObjectGrasping]: Optitrack Initialization starting ...");
     }
     else if(_averageCount == AVERAGE_COUNT)
     {
-      ROS_INFO("Optitrack Initialization done !");
+      ROS_INFO("[ObjectGrasping]: Optitrack Initialization done !");
       _leftRobotOrigin = _markersPosition0.col(ROBOT_BASIS_LEFT)-_markersPosition0.col(ROBOT_BASIS_RIGHT);
     }
   }
@@ -996,7 +997,7 @@ void ObjectGrasping::optitrackInitialization()
 
 void ObjectGrasping::dynamicReconfigureCallback(force_based_ds_modulation::objectGrasping_paramsConfig &config, uint32_t level)
 {
-  ROS_INFO("Reconfigure request. Updatig the parameters ...");
+  ROS_INFO("[ObjectGrasping]: Reconfigure request. Updatig the parameters ...");
   _filteredForceGain = config.filteredForceGain;
   _velocityLimit = config.velocityLimit;
   _graspingForceThreshold = config.graspingForceThreshold;
