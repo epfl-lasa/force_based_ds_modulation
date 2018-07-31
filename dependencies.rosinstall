@@ -1,11 +1,11 @@
 - git:
     local-name: kuka-lwr-ros
     uri: https://github.com/epfl-lasa/kuka-lwr-ros.git
-    version: master-ros-kinetic-walid
+    version: dev_controllers
 
 - git:
     local-name: SVMGrad
-    uri: https://github.com/nbfigueroa/SVMGrad
+    uri: git@github.com:nbfigueroa/SVMGrad.git
 
 - git:
     local-name: sg_differentiation
