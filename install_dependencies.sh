@@ -41,6 +41,14 @@ echo "#####################"
 tput sgr0
 catkin_make
 tput setaf 6
+echo "###########################"
+echo "# Create data directories #"
+echo "###########################"
+tput sgr0
+mkdir src/force_based_ds_modulation/data_grasping
+mkdir src/force_based_ds_modulation/data_polishing
+mkdir src/force_based_ds_modulation/data_surface
+tput setaf 6
 echo "#################################"
 echo "# Everything done hopefully !!! #"
 echo "#################################"
