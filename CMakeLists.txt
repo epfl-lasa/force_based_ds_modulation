@@ -19,7 +19,10 @@ find_package(catkin REQUIRED COMPONENTS
   utils
 )
 
-find_package(Eigen3 REQUIRED)
+find_package(Eigen 3 QUIET) 
+if(NOT Eigen_FOUND)
+  include(cmake/FindEigen3.cmake)
+endif() 
 
 ## Generate added messages and services
 generate_messages(DEPENDENCIES std_msgs)
