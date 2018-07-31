@@ -61,7 +61,7 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _markersTracked.setConstant(0);
 
   _smax = 4.0f;
-  _s = 0.0f;
+  _s = _smax;
   _dW = 0.0f;
 
   _sequenceID = 0;
@@ -578,7 +578,7 @@ void SurfacePolishing::computeModulatedDS()
   }
 
   // Compute desired force profile
-  if(_normalForce<3.0f)
+  if(_normalForce<5.0f)
   {
     _Fd = 5.0f;
   }
@@ -705,7 +705,7 @@ void SurfacePolishing::logData()
               << (_markersPosition.col(P1)-_markersPosition.col(ROBOT_BASIS)).transpose() << " "
               << _normalDistance << " "
               << _normalForce << " "
-              << _Fd*_d1 << " "
+              << _Fd << " "
               << _sequenceID << " "
               << (int) _ensurePassivity << " "
               << _s << " " 
