@@ -22,7 +22,7 @@ This script should install the package dependencies and compile everything
 # Dependencies
 The main dependencies are the following ones:
 
- - **ROS**: Robot operating system
+ - **ROS**: Robot operating system (indigo distribution)
  - **CMake**: Build system
  - **Eigen**: A library for linear algebra
  - **libsvm**: A library for Support Vector Machines (SVM)
