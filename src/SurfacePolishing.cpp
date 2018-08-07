@@ -53,7 +53,6 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _optitrackOK = false;
   _wrenchBiasOK = false;
   _stop = false;
-  _ensurePassivity = true;
 
   _markersPosition.setConstant(0.0f);
   _markersPosition0.setConstant(0.0f);
@@ -275,7 +274,7 @@ void SurfacePolishing::run()
   {
     if(_firstRobotPose && _firstRobotTwist && _wrenchBiasOK &&
        _firstOptitrackPose[ROBOT_BASIS] && _firstOptitrackPose[P1] &&
-       _firstOptitrackPose[P2] && _firstOptitrackPose[P3])
+       _firstOptitrackPose[P2] && _firstOptitrackPose[P3] && _firstDampingMatrix)
     {
       _mutex.lock();
 
@@ -333,9 +332,6 @@ void SurfacePolishing::computeCommand()
 
   // Compute nominal DS
   computeNominalDS();
-
-  // Update tank scalar variables
-  updateTankScalars();
 
   // Compute modulated DS
   computeModulatedDS();
@@ -528,13 +524,13 @@ void SurfacePolishing::updateTankScalars()
   }
   _alpha = Utils::smoothFall(_s,_smax-0.1f*_smax,_smax);
 
-  _ut = _v.dot(_fx);
+  _pn = _d1*_v.dot(_fx);
 
-  if(_s < 0.0f && _ut < 0.0f)
+  if(_s < 0.0f && _pn < 0.0f)
   {
     _beta = 0.0f;
   }
-  else if(_s > _smax && _ut > FLT_EPSILON)
+  else if(_s > _smax && _pn > FLT_EPSILON)
   {
     _beta = 0.0f;
   }
@@ -543,13 +539,13 @@ void SurfacePolishing::updateTankScalars()
     _beta = 1.0f;
   }
   
-  _vt = _v.dot(_e1);
+  _pf = _Fd*_v.dot(_e1);
   
-  if(_s < FLT_EPSILON && _vt > FLT_EPSILON)
+  if(_s < FLT_EPSILON && _pf > FLT_EPSILON)
   {
     _gamma = 0.0f;
   }
-  else if(_s > _smax && _vt < FLT_EPSILON)
+  else if(_s > _smax && _pf < FLT_EPSILON)
   {
     _gamma = 0.0f;
   }
@@ -558,7 +554,7 @@ void SurfacePolishing::updateTankScalars()
     _gamma = 1.0f;
   }
 
-  if(_vt<FLT_EPSILON)
+  if(_pf<FLT_EPSILON)
   {
     _gammap = 1.0f;
   }
@@ -587,13 +583,11 @@ void SurfacePolishing::computeModulatedDS()
     _Fd = _targetForce;
   }
 
-  if(_ensurePassivity)
-  {
-    _Fd*=_gammap;
-  }
+  // Update tank scalar variables
+  updateTankScalars();
 
   // Compute modulation gain
-  float delta = std::pow(2.0f*_e1.dot(_fx)*_Fd/_d1,2.0f)+4.0f*std::pow(_fx.norm(),4.0f); 
+  float delta = std::pow(2.0f*_e1.dot(_fx)*_gammap*_Fd/_d1,2.0f)+4.0f*std::pow(_fx.norm(),4.0f); 
   float la;
   if(fabs(_fx.norm())<FLT_EPSILON)
   {
@@ -601,41 +595,38 @@ void SurfacePolishing::computeModulatedDS()
   }
   else
   {
-    la = (-2.0f*_e1.dot(_fx)*_Fd/_d1+sqrt(delta))/(2.0f*std::pow(_fx.norm(),2.0f));
+    la = (-2.0f*_e1.dot(_fx)*_gammap*_Fd/_d1+sqrt(delta))/(2.0f*std::pow(_fx.norm(),2.0f));
   }
 
-  if(_ensurePassivity && _s < 0.0f && _ut < 0.0f)
+  if(_s < 0.0f && _pn < 0.0f)
   {
     la = 1.0f;
   }
 
   // Update tank dynamics
-  float ds;
-  if(_firstDampingMatrix)
-  {
-    ds = _dt*(_alpha*_v.transpose()*_D*_v-_beta*_d1*(la-1.0f)*_ut-_gamma*_Fd*_vt);
+  _pd = _v.transpose()*_D*_v;
+  float  ds = _dt*(_alpha*_pd-_beta*(la-1.0f)*_pn-_gamma*_pf);
 
-    if(_s+ds>=_smax)
-    {
-      _s = _smax;
-    }
-    else if(_s+ds<=0.0f)
-    {
-      _s = 0.0f;
-    }
-    else
-    {
-      _s+=ds;
-    }
+  if(_s+ds>=_smax)
+  {
+    _s = _smax;
+  }
+  else if(_s+ds<=0.0f)
+  {
+    _s = 0.0f;
+  }
+  else
+  {
+    _s+=ds;
   }
 
   // Update robot's power flow
-  _dW = _d1*(la-1.0f)*(1-_beta)*_ut+_Fd*(_gammap-_gamma)*_vt-(1-_alpha)*_v.transpose()*_D*_v;
+  _dW = (la-1.0f)*(1-_beta)*_pn+(_gammap-_gamma)*_pf-(1-_alpha)*_pd;
 
   // Compute modulated DS
-  _vd = la*_fx+_Fd*_e1/_d1;
+  _vd = la*_fx+_gammap*_Fd*_e1/_d1;
 
-  std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd:  " << _Fd << " ||fx||: " << _fx.norm() << std::endl;
+  std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd:  " << _gammap*_Fd << " ||fx||: " << _fx.norm() << std::endl;
   std::cerr << "[SurfacePolishing]: la: " << la << " vd: " << _vd.norm() << std::endl;
   std::cerr << "[SurfacePolishing]: Tank: " << _s  <<" dW: " << _dW <<std::endl;
 
@@ -693,6 +684,7 @@ void SurfacePolishing::computeDesiredOrientation()
   _omegad = omegaTemp; 
 }
 
+
 void SurfacePolishing::logData()
 {
   _outputFile << ros::Time::now() << " "
@@ -707,7 +699,6 @@ void SurfacePolishing::logData()
               << _normalForce << " "
               << _Fd << " "
               << _sequenceID << " "
-              << (int) _ensurePassivity << " "
               << _s << " " 
               << _alpha << " "
               << _beta << " "

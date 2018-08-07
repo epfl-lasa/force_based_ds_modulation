@@ -49,8 +49,9 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
     _beta[k] = 0.0f;
     _gamma[k] = 0.0f;
     _gammap[k] = 0.0f;
-    _ut[k] = 0.0f;
-    _vt[k] = 0.0f;
+    _pn[k] = 0.0f;
+    _pf[k] = 0.0f;
+    _pd[k] = 0.0f;
     _dW[k] = 0.0f;
     
     _wrenchCount[k] = 0;
@@ -62,7 +63,6 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
   _objectGrasped = false;
   _firstObjectPose = false;
   _stop = false;
-  _ensurePassivity = true;
   _goHome = false;
 
   _taskAttractor << -0.4f, 0.5f, 0.6f;
@@ -243,7 +243,7 @@ void ObjectGrasping::run()
   {
     if(_firstRobotPose[RIGHT] && _firstRobotPose[LEFT] && _wrenchBiasOK[RIGHT] && _wrenchBiasOK[LEFT] &&
        _firstOptitrackPose[ROBOT_BASIS_RIGHT] && _firstOptitrackPose[ROBOT_BASIS_LEFT] && _firstOptitrackPose[P1] &&
-       _firstOptitrackPose[P2] && _firstOptitrackPose[P3] && _firstOptitrackPose[P4])
+       _firstOptitrackPose[P2] && _firstOptitrackPose[P3] && _firstOptitrackPose[P4] && _firstDampingMatrix[LEFT] && _firstDampingMatrix[RIGHT])
     {
       _mutex.lock();
 
@@ -404,9 +404,6 @@ void ObjectGrasping::computeCommand()
   // Compute nominal DS
   computeNominalDS();
 
-  // Update tank scalar variables
-  updateTankScalars();
-
   // Compute modulated DS
   computeModulatedDS();
 
@@ -559,13 +556,13 @@ void ObjectGrasping::updateTankScalars()
     float dz = 0.01f;
     float ds = 0.1f*_smax;
 
-    _ut[k] = _v[k].dot(_fx[k]);
+    _pn[k] = _d1[k]*_v[k].dot(_fx[k]);
 
-    if(_s[k] < 0.0f && _ut[k] < 0.0f)
+    if(_s[k] < 0.0f && _pn[k] < 0.0f)
     {
       _beta[k] = 0.0f;
     }
-    else if(_s[k] > _smax && _ut[k] > FLT_EPSILON)
+    else if(_s[k] > _smax && _pn[k] > FLT_EPSILON)
     {
       _beta[k] = 0.0f;
     }
@@ -574,13 +571,13 @@ void ObjectGrasping::updateTankScalars()
       _beta[k] = 1.0f;
     }
     
-    _vt[k] = _v[k].dot(_e1[k]);
+    _pf[k] = _Fd[k]*_v[k].dot(_e1[k]);
     
-    if(_s[k] < FLT_EPSILON && _vt[k] > FLT_EPSILON)
+    if(_s[k] < FLT_EPSILON && _pf[k] > FLT_EPSILON)
     {
       _gamma[k] = 0.0f;
     }
-    else if(_s[k] > _smax && _vt[k] < FLT_EPSILON)
+    else if(_s[k] > _smax && _pf[k] < FLT_EPSILON)
     {
       _gamma[k] = 0.0f;
     }
@@ -589,7 +586,7 @@ void ObjectGrasping::updateTankScalars()
       _gamma[k] = 1.0f;
     }
 
-    if(_vt[k]<FLT_EPSILON)
+    if(_pf[k]<FLT_EPSILON)
     {
       _gammap[k] = 1.0f;
     }
@@ -603,6 +600,8 @@ void ObjectGrasping::updateTankScalars()
 
 void ObjectGrasping::computeModulatedDS()
 {
+
+  // Compute desired force profiles
   for(int k = 0; k < NB_ROBOTS; k++)
   {
     _normalForce[k] = fabs((_wRb[k]*_filteredWrench[k].segment(0,3)).dot(_e1[k]));
@@ -629,14 +628,17 @@ void ObjectGrasping::computeModulatedDS()
         _Fd[k] = _targetForce*alpha;    
       }
     }
+  }
 
-    if(_ensurePassivity)
-    {
-      _Fd[k]*=_gammap[k];
-    }
+  // Update tanks' scalar variables
+  updateTankScalars();
+
+  // Compute modualted DS
+  for(int k = 0; k < NB_ROBOTS; k++)
+  {
 
     // Compute modulation gain
-    float delta = std::pow(2.0f*_e1[k].dot(_fx[k])*(_Fd[k]/_d1[k]),2.0f)+4.0f*std::pow(_fx[k].norm(),4.0f); 
+    float delta = std::pow(2.0f*_e1[k].dot(_fx[k])*(_gammap[k]*_Fd[k]/_d1[k]),2.0f)+4.0f*std::pow(_fx[k].norm(),4.0f); 
     float la;
 
     if(_goHome)
@@ -651,44 +653,40 @@ void ObjectGrasping::computeModulatedDS()
       }
       else
       {
-        la = (-2.0f*_e1[k].dot(_fx[k])*(_Fd[k]/_d1[k])+sqrt(delta))/(2.0f*std::pow(_fx[k].norm(),2.0f));
+        la = (-2.0f*_e1[k].dot(_fx[k])*(_gammap[k]*_Fd[k]/_d1[k])+sqrt(delta))/(2.0f*std::pow(_fx[k].norm(),2.0f));
       }
       
-      if(_ensurePassivity && _s[k] < 0.0f && _ut[k] < 0.0f)
+      if(_s[k] < 0.0f && _pn[k] < 0.0f)
       {
         la = 1.0f;
       }
     }
 
     // Update tank dynamics
-    float ds;
+    _pd[k] = _v[k].transpose()*_D[k]*_v[k]; 
+    float ds = _dt*(_alpha[k]*_pd[k]-_beta[k]*(la-1.0f)*_pn[k]-_gamma[k]*_pf[k]);
 
-    if(_firstDampingMatrix[k])
+    if(_s[k]+ds>=_smax)
     {
-      ds = _dt*(_alpha[k]*_v[k].transpose()*_D[k]*_v[k]-_beta[k]*_d1[k]*(la-1.0f)*_ut[k]-_gamma[k]*_Fd[k]*_vt[k]);
-
-      if(_s[k]+ds>=_smax)
-      {
-        _s[k] = _smax;
-      }
-      else if(_s[k]+ds<=0.0f)
-      {
-        _s[k] = 0.0f;
-      }
-      else
-      {
-        _s[k]+=ds;
-      }
+      _s[k] = _smax;
+    }
+    else if(_s[k]+ds<=0.0f)
+    {
+      _s[k] = 0.0f;
+    }
+    else
+    {
+      _s[k]+=ds;
     }
 
     // Update robot's power flow
-    _dW[k] = _d1[k]*(la-1.0f)*(1-_beta[k])*_ut[k]+_Fd[k]*(_gammap[k]-_gamma[k])*_vt[k]-(1-_alpha[k])*_v[k].transpose()*_D[k]*_v[k];
+    _dW[k] = (la-1.0f)*(1-_beta[k])*_pn[k]+(_gammap[k]-_gamma[k])*_pf[k]-(1-_alpha[k])*_pd[k];
 
     // Comput modulated DS
-    _vd[k] = la*_fx[k]+_Fd[k]*_e1[k]/_d1[k];
+    _vd[k] = la*_fx[k]+_gammap[k]*_Fd[k]*_e1[k]/_d1[k];
     _vd[k]+=_vdC;
 
-    std::cerr << "[ObjectGrasping]: Robot " << k << ": Fd: " << _Fd[k] << " delta: " << delta << " la: " << la << " vdr.dot(e1) " << _e1[k].dot(_fx[k]) << std::endl;
+    std::cerr << "[ObjectGrasping]: Robot " << k << ": Fd: " << _gammap[k]*_Fd[k] << " delta: " << delta << " la: " << la << " vdr.dot(e1) " << _e1[k].dot(_fx[k]) << std::endl;
     std::cerr << "[ObjectGrasping]: Robot " << k << ": Tank: " << _s[k]  <<" dW: " << _dW[k] <<std::endl;
 
     // Bound desired velocity for safety
@@ -787,7 +785,6 @@ void ObjectGrasping::logData()
               << _xdC.transpose() << " "
               << _xdD.transpose() << " "
               << (int) _objectGrasped << " "
-              << (int) _ensurePassivity << " "
               << _s[LEFT] << " " 
               << _alpha[LEFT] << " "
               << _beta[LEFT] << " "

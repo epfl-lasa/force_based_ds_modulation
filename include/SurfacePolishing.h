@@ -114,7 +114,6 @@ class SurfacePolishing
 		bool _optitrackOK;																	// Check if all markers position is received
 		bool _wrenchBiasOK;																	// Check if computation of force/torque sensor bias is OK
 		bool _stop;																					// Check for CTRL+C
-		bool _ensurePassivity;															// Check if we use energy tank to preserve passivity
 
     // Optitrack variables
     Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition;       // Markers position in optitrack frame
@@ -132,8 +131,9 @@ class SurfacePolishing
 		float _beta;			// Scalar variable controlling the flow of the energy due to the nominal DS
 		float _gamma;     // Scalar variable controlling the flow of the energy due to the contact force
 		float _gammap;    // Scalar variable adapting the control low to ensure passivity
-		float _ut;				// Power variable of the nominal DS
-		float _vt;				// Power variable of the contact force
+		float _pn;				// Power due to the nominal DS
+		float _pf;				// Power due to the contact force
+		float _pd;				// Dissipated power
 		float _dW;				// Robot's power flow
 		
 		// User variables

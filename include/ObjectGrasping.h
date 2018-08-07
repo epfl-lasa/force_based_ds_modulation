@@ -135,10 +135,10 @@ class ObjectGrasping
     bool _optitrackOK;                                  // Check if all markers position is received
     bool _wrenchBiasOK[NB_ROBOTS];                      // Check if computation of force/torque sensor bias is OK
     bool _stop;                                         // Check for CTRL+C
-    bool _ensurePassivity;                              // Check if we use energy tank to preserve passivity
     bool _objectGrasped;                                // Check if the object is grasped
     bool _objectReachable;                              // Check if object is reachable by both robots
     bool _goHome;                                       // check for goHome state (object not reachable+ not grasped)
+
     // Optitrack variables
     Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition;       // Markers position in optitrack frame
     Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition0;      // Initial markers position in opittrack frame
@@ -157,8 +157,9 @@ class ObjectGrasping
     float _beta[NB_ROBOTS];      // Scalar variable controlling the flow of the energy due to the nominal DS
     float _gamma[NB_ROBOTS];     // Scalar variable controlling the flow of the energy due to the contact force
     float _gammap[NB_ROBOTS];    // Scalar variable adapting the control low to ensure passivity
-    float _ut[NB_ROBOTS];        // Power variable of the nominal DS
-    float _vt[NB_ROBOTS];        // Power variable of the contact force
+    float _pn[NB_ROBOTS];        // Power due to the nominal DS
+    float _pf[NB_ROBOTS];        // Power due to the contact force
+    float _pd[NB_ROBOTS];        // Dissipated power
     float _dW[NB_ROBOTS];        // Robot's power flow
 
     // User variables
