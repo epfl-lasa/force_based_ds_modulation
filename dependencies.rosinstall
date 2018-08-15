@@ -5,7 +5,7 @@
 
 - git:
     local-name: SVMGrad
-    uri: git@github.com:nbfigueroa/SVMGrad.git
+    uri: https://github.com/nbfigueroa/SVMGrad.git
 
 - git:
     local-name: sg_differentiation
