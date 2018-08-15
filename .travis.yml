@@ -30,7 +30,7 @@ before_install:
   - sudo apt-get update -qq
   # Install ROS
   - sudo apt-get install -y python-catkin-pkg python-rosdep python-wstool ros-$ROS_DISTRO-catkin ros-$ROS_DISTRO-ros ros-$ROS_DISTRO-rospy ros-$ROS_DISTRO-rostest
-  - sudo apt-get install ros-$ROS_DISTRO-control-toolbox ros-$ROS_DISTRO-controller-interface ros-$ROS_DISTRO-controller-manager
+  - sudo apt-get install ros-$ROS_DISTRO-control-toolbox ros-$ROS_DISTRO-controller-interface ros-$ROS_DISTRO-controller-manager ros-$ROS_DISTRO-diagnostic-updater
   - source /opt/ros/$ROS_DISTRO/setup.bash
   # Setup for rosdep
   - sudo rosdep init
