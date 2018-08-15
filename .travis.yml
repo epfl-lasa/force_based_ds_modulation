@@ -65,7 +65,7 @@ install:
 before_script:
   # source dependencies: install using wstool.
   - cd ~/catkin_ws/src
-  - ssh -o StrictHostKeyChecking=no git@github.com
+  - ssh -T git@github.com
   - source force_based_ds_modulation/install_dependencies.sh
 
 # Compile and test.
