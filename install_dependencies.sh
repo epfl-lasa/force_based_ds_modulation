@@ -23,8 +23,9 @@ echo "################################"
 tput sgr0
 sudo wstool init
 sudo wstool merge force_based_ds_modulation/dependencies.rosinstall
+sudo wstool up
 sudo wstool merge kuka-lwr-ros/dependencies.rosinstall
-wstool up
+sudo wstool up
 tput setaf 6
 echo "##########################################################"
 echo "# Compile libsvm and add executables to environment path #"
