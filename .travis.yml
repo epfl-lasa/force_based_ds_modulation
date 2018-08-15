@@ -18,6 +18,9 @@ virtualenv:
 # Install system dependencies, namely ROS.
 before_install:
   - openssl aes-256-cbc -K $encrypted_9ce88cf8d916_key -iv $encrypted_9ce88cf8d916_iv -in id_ci_rsa.enc -out ~/.ssh/id_ci_rsa -d
+  - chmod 600 ~/.ssh/id_ci_rsa
+  - eval $(ssh-agent -s)
+  - ssh-add ~/.ssh/id_ci_rsa
   # Define some config vars.
   - export ROS_DISTRO=indigo
   - export ROS_CI_DESKTOP=`lsb_release -cs`  # e.g. [precise|trusty]
@@ -59,6 +62,7 @@ install:
 before_script:
   # source dependencies: install using wstool.
   - cd ~/catkin_ws/src
+  - echo -e "Host github.com\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
   - source force_based_ds_modulation/install_dependencies.sh
 
 # Compile and test.
