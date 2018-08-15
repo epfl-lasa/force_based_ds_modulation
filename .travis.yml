@@ -13,8 +13,8 @@ cache:
 virtualenv:
     system_site_packages: true
 
-# addons:
-  # ssh_known_hosts: github.com
+addons:
+  ssh_known_hosts: github.com
 
 ################################################################################
 
@@ -65,7 +65,6 @@ install:
 before_script:
   # source dependencies: install using wstool.
   - cd ~/catkin_ws/src
-  - ssh -o "StrictHostKeyChecking no"
   - source force_based_ds_modulation/install_dependencies.sh
 
 # Compile and test.
