@@ -21,9 +21,9 @@ echo "################################"
 echo "# Get all package dependencies #"
 echo "################################"
 tput sgr0
-wstool init
-wstool merge force_based_ds_modulation/dependencies.rosinstall
-wstool merge kuka-lwr-ros/dependencies.rosinstall
+sudo wstool init
+sudo wstool merge force_based_ds_modulation/dependencies.rosinstall
+sudo wstool merge kuka-lwr-ros/dependencies.rosinstall
 wstool up
 tput setaf 6
 echo "##########################################################"
