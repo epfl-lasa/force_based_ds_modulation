@@ -66,11 +66,11 @@ install:
 before_script:
   # source dependencies: install using wstool.
   - cd ~/catkin_ws/src
-  - ~(ssh -vT git@github.com)
-  - source force_based_ds_modulation/install_dependencies.sh
 
 # Compile and test.
 script:
+  - ssh -vT git@github.com
+  - source force_based_ds_modulation/install_dependencies.sh
   - cd ~/catkin_ws
   # If the CATKIN_OPTIONS file exists, use it as an argument to catkin_make
   - catkin_make $( [ -f $CATKIN_OPTIONS ] && cat $CATKIN_OPTIONS )
