@@ -57,3 +57,75 @@ The file system is divided in several subfolders:
 
 The `data_grasping`, `data_polishing`, and `data_surface` directories are generated automatically during the installation.
 
+# Setup the robot
+Open a terminal and start a ROS Master
+```sh
+roscore
+```
+Open two other terminals and launch the files related to the KUKA robot. Follow the instructions in https://github.com/epfl-lasa/kuka-lwr-ros to properly setup the communication with the robot :
+```sh
+roslaunch lwr_simple_example real.launch
+```
+```sh
+roslaunch lwr_fri lwr_fri_console.launch
+```
+You can change the gains of the DS-impedance controller using rqt_reconfigure. Open a new terminal and execute:
+```sh
+rosrun rqt_reconfigure rqt_reconfigure
+```
+Once everything is setup correctly you can start using this package. 
+
+# Polishing task
+Put makers on the three corners of your surface as described below to define the surface reference frame:
+1---------------2
+| SURFACE |
+3 ---------------
+Start the optitrack tracking by executing in a new terminal:
+```sh
+roslaunch force_based_ds_modulation optitrack_surface_polishing.launch
+```
+Similarly, you need to setup the ATI 6 axis force torque sensor to stream the measured data:
+```sh
+roslaunch netft_rdt_driver ft_sensor.launch
+```
+You might need to learn the model of your surface if it is non-flat. It can be achieved using the _surface_learning_ node. There is three available modes:
+- _Collecting Data:_ It allows to collect datapoints on the surface. The user should bring the robot in contact with the surface and sweep it while applying a bit of force
+    ```sh
+    rosrun force_based_ds_modulation surface_learning 'filename' -m 'c'
+    ```
+    - _filename_ : Specify the filename used to generate the model file
+    - -m _c_ : Select the collecting data mode
+- _Learning Model_: It learns the surface model using the collected data and generates the svmgrad model file
+    ```sh
+    rosrun force_based_ds_modulation surface_learning 'filename' -m 'l' -c 'C' -s 's' -e 'e' -g 'y/n' -u 'y/n'
+    ```
+    - _filename_ : Specify the filename used to generate the model file
+    - -m _l_ : Select the learning mode
+    - -c _C_ : Specify the C parameter value of SVR
+    - -s _s_ : Specify the sigma value of the gaussian kernel used with SVR
+    - -e _e_ : Specify the epsilon tube width
+    - -g _y/n_ : Generate training data (might be needed once _y_, then you can set it to _n_ for the next times if you just want to test other parameters for SVR while keeping the same training data)
+    - -u _y/n_ : The training data are built by generating random datapoints above and below the surface and estimating their normal distance to the surface using the collected datapoints. If set to _y_, this option allows to add the datapoints collected on the surface to the training data by setting the estimated normal to 0 for them.
+- _Testing Model_: It allows to test the model by aligning the end-effector of the robot with the normal to the surface estimated. It is advised to put the DS-impedance controller gains to 0 such that the user can freely move the robot around
+    ```sh
+    rosrun force_based_ds_modulation surface_learning 'filename' -m 't'
+    ```
+    - _filename_ : Specify the filename used to generate the model file
+    - -m _t_ : Select the testing model mode
+    
+To use the model learned in the polishing task you need to copy and paste the model file generated as follows:
+```sh
+cp force_based_ds_modulation/data_surface/'filename'_svmgrad_model.txt  force_based_ds_modulation/data_surface/learned_surface_svmgrad_model.txt
+```
+Where _filename_ should match the filename you used to learn the model of the surface. Note also that the command above assumes that you are in the `src` directory of your catkin workspace, so adapt it in consequence !
+
+You are now ready to execute the _surface_polishing_ node:
+```sh
+rosrun force_based_ds_modulation surface_polishing 'fileName' -s 'p/n' -v 'v' -f 'f'
+```
+- _filename_ : Specify the filename used to log the experimental data
+- -s _p/n_ : Select the surface type (_p_ for planar or _n_ for non-flat)
+- -v _v_ : Specify the target velocity of the nominal DS in _m/s_
+- -f _f_ : Specify the target force in contact in _N_
+
+WARNING !!!: The commands above should be executed without the apostrophes !!!!
