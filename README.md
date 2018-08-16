@@ -1,4 +1,5 @@
 # Force-based DS modulation
+[![Build Status](https://travis-ci.org/epfl-lasa/force_based_ds_modulation.svg?branch=master)](https://travis-ci.org/epfl-lasa/force_based_ds_modulation)
 
 This ROS package contains the software implementation related to the work about motion and force generation
 with dynamical systems: 
