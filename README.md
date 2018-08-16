@@ -1,10 +1,19 @@
 # Force-based DS modulation
 [![Build Status](https://travis-ci.org/epfl-lasa/force_based_ds_modulation.svg?branch=master)](https://travis-ci.org/epfl-lasa/force_based_ds_modulation)
 
-This ROS package contains the software implementation related to the work about motion and force generation
-with dynamical systems: 
+This ROS package contains the software implementation used for the experimental evaluations of the work on:
+_A Dynamical System-Based Approach to Motion and Force Generation for Robotic Manipulators in Contact Tasks_
 
-The practical experiments were performed with KUKA LWR IV+ robots.
+The authors are:
+_Walid Amanhoud_
+_Mahdi Khoramshahi_
+_Aude Billard_
+
+Refer to http://lasa.epfl.ch/publications/publications.php for more info.
+
+Videos of the experimental evaluations can be watched here: https://youtu.be/y6B5_FAWGN0.
+
+The experiments are performed with KUKA LWR IV+ robots.
 
 # Installation
 
@@ -18,7 +27,7 @@ Stay in the `src` directory and run the script *install_dependencies.sh*:
 ```sh
 source force_based_ds_modulation/install_dependencies.sh
 ```
-This script should install the package dependencies and compile everything
+This script should install the package dependencies and compile everything.
 
 # Dependencies
 The main dependencies are the following ones:
@@ -77,9 +86,13 @@ Once everything is setup correctly you can start using this package.
 
 # Polishing task
 Put makers on the three corners of your surface as described below to define the surface reference frame:
+
 1---------------2
+
 | SURFACE |
+
 3 ---------------
+
 Start the optitrack tracking by executing in a new terminal:
 ```sh
 roslaunch force_based_ds_modulation optitrack_surface_polishing.launch
@@ -121,7 +134,7 @@ Where _filename_ should match the filename you used to learn the model of the su
 
 You are now ready to execute the _surface_polishing_ node:
 ```sh
-rosrun force_based_ds_modulation surface_polishing 'fileName' -s 'p/n' -v 'v' -f 'f'
+rosrun force_based_ds_modulation surface_polishing 'filename' -s 'p/n' -v 'v' -f 'f'
 ```
 - _filename_ : Specify the filename used to log the experimental data
 - -s _p/n_ : Select the surface type (_p_ for planar or _n_ for non-flat)
@@ -129,3 +142,7 @@ rosrun force_based_ds_modulation surface_polishing 'fileName' -s 'p/n' -v 'v' -f
 - -f _f_ : Specify the target force in contact in _N_
 
 WARNING !!!: The commands above should be executed without the apostrophes !!!!
+
+# Reaching, grasping and manipulation task
+
+TO DO
