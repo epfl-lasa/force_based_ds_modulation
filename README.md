@@ -85,7 +85,7 @@ rosrun rqt_reconfigure rqt_reconfigure
 Once everything is setup correctly you can start using this package. 
 
 # Polishing task
-Put makers on the three corners of your surface as described below to define the surface reference frame:
+Put markers around the basis of the robot and on the three corners of your surface as described below to define the surface reference frame:
 
 1---------------2
 
@@ -144,5 +144,38 @@ rosrun force_based_ds_modulation surface_polishing 'filename' -s 'p/n' -v 'v' -f
 WARNING !!!: The commands above should be executed without the apostrophes !!!!
 
 # Reaching, grasping and manipulation task
+You need first to setup the two robots. Two computers are required, one for each robot. Define the ROS Master on the first computer and set the _ROS_MASTER_URI_ of the second computer to the IP Address of the first one. By doing so, you can communicate between the two machines through the ROS network.
 
-TO DO
+Proceed then as described previously (section: Setup the robot) to setup the communication for each robot. For the second robot however, change the branch of the **kuka-lwr-ros** package to _dev_controllers_two_robots_ and recompile everything before launching the files. It gives a different namespace to the second robot while keeping the same variables and topics names.
+
+Similarly to the polishing task, you need to put makers around the basis of each robot and on the object to grasp. Four markers are required for the object. Assuming that the object is a box, the markers can be put on the top face:
+
+2------------3
+
+| OBJECT |
+
+1 ------------4
+
+Start the optitrack tracking by executing in a new terminal:
+```sh
+roslaunch force_based_ds_modulation optitrack_object_grasping.launch
+```
+Setup the ATI 6 axis force torque sensors attached to the robots by running the command below:
+```sh
+roslaunch netft_rdt_driver ft_2_sensors.launch
+```
+When the optitrack tracking is running, you can use the _two_robots_transform_ node to publish the transformation between the robots' basis:
+```sh
+rosrun force_based_ds_modulation two_robots_transform -m 's/r'
+```
+- -m _s/r_ : Select the mode (_s_ for simulation or _r_ for real experiments)
+
+For now, the transformation obtained from optitrack is only used for vizualising the two robots in RVIZ. The transformation used for computing the robots' control commands is hard-coded in the ObjectGrasping class. This will be changed soon.
+
+Once everything is ready, you can perform the reaching, grasping and manipulation task by executing:
+```sh
+rosrun force_based_ds_modulation object_grasping 'filename' -m 'rg/rgm' -f 'f'
+```
+- _filename_ : Specify the filename used to log the experimental data
+- -m _rg/rgm_ : Select the surface type (_rg_ for reaching and grasping or _rgm_ for reaching, grasping and moving the object to a predfefined position, that can be offseted afterwards using _rqt_reconfigure_)
+- -f _f_ : Specify the target force that both robots should apply in contact with the object's surface in _N_
