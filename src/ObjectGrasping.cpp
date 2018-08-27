@@ -241,9 +241,10 @@ void ObjectGrasping::run()
 {
   while (!_stop) 
   {
-    if(_firstRobotPose[RIGHT] && _firstRobotPose[LEFT] && _wrenchBiasOK[RIGHT] && _wrenchBiasOK[LEFT] &&
+    if(_firstRobotPose[RIGHT] && _firstRobotPose[LEFT] && _firstRobotTwist[RIGHT] && _firstRobotTwist[LEFT] &&
+       _wrenchBiasOK[RIGHT] && _wrenchBiasOK[LEFT] && _firstDampingMatrix[RIGHT] && _firstDampingMatrix[LEFT] &&
        _firstOptitrackPose[ROBOT_BASIS_RIGHT] && _firstOptitrackPose[ROBOT_BASIS_LEFT] && _firstOptitrackPose[P1] &&
-       _firstOptitrackPose[P2] && _firstOptitrackPose[P3] && _firstOptitrackPose[P4] && _firstDampingMatrix[LEFT] && _firstDampingMatrix[RIGHT])
+       _firstOptitrackPose[P2] && _firstOptitrackPose[P3] && _firstOptitrackPose[P4])
     {
       _mutex.lock();
 
