@@ -164,13 +164,11 @@ Setup the ATI 6 axis force torque sensors attached to the robots by running the 
 ```sh
 roslaunch netft_rdt_driver ft_2_sensors.launch
 ```
-When the optitrack tracking is running, you can use the _two_robots_transform_ node to publish the transformation between the robots' basis:
+When the optitrack tracking is running, you can use the _two_robots_transform_ node to publish the transformation between the robots' basis. This is used for vizualising the two robots in RVIZ:
 ```sh
 rosrun force_based_ds_modulation two_robots_transform -m 's/r'
 ```
 - -m _s/r_ : Select the mode (_s_ for simulation or _r_ for real experiments)
-
-For now, the transformation obtained from optitrack is only used for vizualising the two robots in RVIZ. The transformation used for computing the robots' control commands is hard-coded in the ObjectGrasping class. This will be changed soon.
 
 Once everything is ready, you can perform the reaching, grasping and manipulation task by executing:
 ```sh
