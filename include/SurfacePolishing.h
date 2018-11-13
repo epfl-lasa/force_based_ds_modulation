@@ -38,7 +38,7 @@ class SurfacePolishing
 
 	private:
 		// ROS variables
-		ros::NodeHandle _n;
+		ros::NodeHandle _nh;
 		ros::Rate _loopRate;
 		float _dt;
 
@@ -89,17 +89,22 @@ class SurfacePolishing
 		Eigen::Vector3f _xd;				// Desired position [m] (3x1)
 		Eigen::Vector4f _qd;				// Desired quaternion (4x1)
 		Eigen::Vector3f _omegad;		// Desired angular velocity [rad/s] (3x1)
-		Eigen::Vector3f _fx;				// Desired Nominal velociy [m/s] (3x1)
-		Eigen::Vector3f _vd;				// Desired modulated velocity [m/s] (3x1)
+		Eigen::Vector3f _fxc;				// Desired conservative part of the nominal DS [m/s] (3x1)
+		Eigen::Vector3f _fxr;				// Desired non-conservative part of the nominal DS [m/s] (3x1)
+		Eigen::Vector3f _fx;				// Nominal DS [m/s] (3x1)
+		Eigen::Vector3f _fxp;				// Corrected nominal DS to ensure passivity [m/s] (3x1)
+		Eigen::Vector3f _vd;				// Desired modulated DS [m/s] (3x1)
 		float _targetForce;					// Target force in contact [N]
 		float _targetVelocity;			// Velocity norm of the nominal DS [m/s]
-		float _Fd;									// Desired force profile
+		float _Fd;									// Desired force profile [N]
+		float _Fdp;									// Corrected desired force profile to ensure passivity [N]
+		float _lambdaf;             // Scalar variable modulating the nominal DS
 
 		// Task variables
 		SurfaceType _surfaceType;							// Surface type
     Eigen::Vector3f _taskAttractor;				// Attractor position [m] (3x1)
     Eigen::Vector3f _planeNormal;					// Normal vector to the surface (pointing outside the surface) (3x1)
-    Eigen::Vector3f _e1;									// Normal vector to the surface (pointing towards the surface) (3x1)
+    Eigen::Vector3f _n;									  // Normal vector to the surface (pointing towards the surface) (3x1)
     Eigen::Vector3f _p;										// Point on the surface [m] (3x1)
     Eigen::Vector3f _xProj;								// Vertical projection on the surface [m] (3x1)
     Eigen::Matrix3f _wRs;									// Orientation matrix from surface frame to world frame
@@ -127,11 +132,15 @@ class SurfacePolishing
 		// Tank parameters
 		float _s;					// Current tank level
 		float _smax;			// Max tank level
-		float _alpha;			// Scalar variable controlling the flow of the dissipated energy
-		float _beta;			// Scalar variable controlling the flow of the energy due to the nominal DS
-		float _gamma;     // Scalar variable controlling the flow of the energy due to the contact force
-		float _gammap;    // Scalar variable adapting the control low to ensure passivity
-		float _pn;				// Power due to the nominal DS
+		float _alpha;			// Scalar variable controlling the dissipated energy flow
+		float _betac;			// Scalar variable controlling the energy flow due to the conservative part of the nominal DS
+		float _betacp;		// Scalar variable correcting the conservative part of the nominal DS to ensure passivity
+		float _betar;		  // Scalar variable controlling the energy flow due to the non-conservative part of the nominal DS		
+		float _betarp;		// Scalar variable correcting the non-conservative part of the nominal DS to ensure passivity
+		float _gamma;     // Scalar variable controlling the energy flow due to the contact force
+		float _gammap;    // Scalar variable correcting the force profile to ensure passivity
+		float _pc;				// Power due to the conservative part of the nominal DS
+		float _pr;				// Power due to the non-conservative part of the nominal DS
 		float _pf;				// Power due to the contact force
 		float _pd;				// Dissipated power
 		float _dW;				// Robot's power flow

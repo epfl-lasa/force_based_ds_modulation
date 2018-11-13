@@ -5,7 +5,7 @@ SurfacePolishing* SurfacePolishing::me = NULL;
 
 SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::string fileName, 
                                    SurfaceType surfaceType, float targetVelocity, float targetForce):
-  _n(n),
+  _nh(n),
   _loopRate(frequency),
   _dt(1.0f/frequency),
   _fileName(fileName),
@@ -31,11 +31,16 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
 
 
   _xd.setConstant(0.0f);
+  _fxc.setConstant(0.0f);
+  _fxr.setConstant(0.0f);
   _fx.setConstant(0.0f);
+  _fxp.setConstant(0.0f);
   _vd.setConstant(0.0f);
   _Fd = 0.0f;
+  _Fdp = 0.0f;
   _omegad.setConstant(0.0f);
   _qd.setConstant(0.0f);
+  _lambdaf = 0.0f;
 
   _p << 0.0f,0.0f,-0.007f;
   // _taskAttractor << -0.65f, 0.05f, -0.007f;
@@ -131,9 +136,9 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   p1.x = 0.0f;
   p1.y = 0.0f;
   p1.z = 0.0f;
-  p2.x = 0.0f+0.3f*_e1(0);
-  p2.x = 0.0f+0.3f*_e1(1);
-  p2.x = 0.0f+0.3f*_e1(2);
+  p2.x = 0.0f+0.3f*_n(0);
+  p2.x = 0.0f+0.3f*_n(1);
+  p2.x = 0.0f+0.3f*_n(2);
   _msgArrowMarker.scale.x = 0.05;
   _msgArrowMarker.scale.y = 0.1;
   _msgArrowMarker.scale.z = 0.1;
@@ -163,22 +168,22 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
 bool SurfacePolishing::init() 
 {
   // Subscriber definitions
-  _subRobotPose = _n.subscribe("/lwr/ee_pose", 1, &SurfacePolishing::updateRobotPose, this, ros::TransportHints().reliable().tcpNoDelay());
-  _subRobotTwist = _n.subscribe("/lwr/joint_controllers/twist", 1, &SurfacePolishing::updateRobotTwist, this, ros::TransportHints().reliable().tcpNoDelay());
-  _subForceTorqueSensor = _n.subscribe("/ft_sensor/netft_data", 1, &SurfacePolishing::updateRobotWrench, this, ros::TransportHints().reliable().tcpNoDelay());
-  _subOptitrackPose[ROBOT_BASIS] = _n.subscribe<geometry_msgs::PoseStamped>("/optitrack/robot/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,ROBOT_BASIS),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
-  _subOptitrackPose[P1] = _n.subscribe<geometry_msgs::PoseStamped>("/optitrack/p1/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,P1),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
-  _subOptitrackPose[P2] = _n.subscribe<geometry_msgs::PoseStamped>("/optitrack/p2/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,P2),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
-  _subOptitrackPose[P3] = _n.subscribe<geometry_msgs::PoseStamped>("/optitrack/p3/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,P3),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
-  _subDampingMatrix = _n.subscribe("/lwr/joint_controllers/passive_ds_damping_matrix", 1, &SurfacePolishing::updateDampingMatrix,this,ros::TransportHints().reliable().tcpNoDelay());
+  _subRobotPose = _nh.subscribe("/lwr/ee_pose", 1, &SurfacePolishing::updateRobotPose, this, ros::TransportHints().reliable().tcpNoDelay());
+  _subRobotTwist = _nh.subscribe("/lwr/joint_controllers/twist", 1, &SurfacePolishing::updateRobotTwist, this, ros::TransportHints().reliable().tcpNoDelay());
+  _subForceTorqueSensor = _nh.subscribe("/ft_sensor/netft_data", 1, &SurfacePolishing::updateRobotWrench, this, ros::TransportHints().reliable().tcpNoDelay());
+  _subOptitrackPose[ROBOT_BASIS] = _nh.subscribe<geometry_msgs::PoseStamped>("/optitrack/robot/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,ROBOT_BASIS),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
+  _subOptitrackPose[P1] = _nh.subscribe<geometry_msgs::PoseStamped>("/optitrack/p1/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,P1),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
+  _subOptitrackPose[P2] = _nh.subscribe<geometry_msgs::PoseStamped>("/optitrack/p2/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,P2),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
+  _subOptitrackPose[P3] = _nh.subscribe<geometry_msgs::PoseStamped>("/optitrack/p3/pose", 1, boost::bind(&SurfacePolishing::updateOptitrackPose,this,_1,P3),ros::VoidPtr(),ros::TransportHints().reliable().tcpNoDelay());
+  _subDampingMatrix = _nh.subscribe("/lwr/joint_controllers/passive_ds_damping_matrix", 1, &SurfacePolishing::updateDampingMatrix,this,ros::TransportHints().reliable().tcpNoDelay());
 
   // Publisher definitions
-  _pubDesiredTwist = _n.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 1);
-  _pubDesiredOrientation = _n.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 1);
-  _pubFilteredWrench = _n.advertise<geometry_msgs::WrenchStamped>("SurfacePolishing/filteredWrench", 1);
-  _pubMarker = _n.advertise<visualization_msgs::Marker>("SurfacePolishing/plane", 1);
-  _pubTaskAttractor = _n.advertise<geometry_msgs::PointStamped>("SurfacePolishing/taskAttractor", 1);  
-  _pubNormalForce = _n.advertise<std_msgs::Float32>("SurfacePolishing/normalForce", 1);
+  _pubDesiredTwist = _nh.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 1);
+  _pubDesiredOrientation = _nh.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 1);
+  _pubFilteredWrench = _nh.advertise<geometry_msgs::WrenchStamped>("SurfacePolishing/filteredWrench", 1);
+  _pubMarker = _nh.advertise<visualization_msgs::Marker>("SurfacePolishing/plane", 1);
+  _pubTaskAttractor = _nh.advertise<geometry_msgs::PointStamped>("SurfacePolishing/taskAttractor", 1);  
+  _pubNormalForce = _nh.advertise<std_msgs::Float32>("SurfacePolishing/normalForce", 1);
 
   // Dynamic reconfigure definition
   _dynRecCallback = boost::bind(&SurfacePolishing::dynamicReconfigureCallback, this, _1, _2);
@@ -192,7 +197,7 @@ bool SurfacePolishing::init()
   _outputFile.open(ros::package::getPath(std::string("force_based_ds_modulation"))+"/data_polishing/"+_fileName+".txt");
 
 
-  if(!_n.getParamCached("/lwr/ds_param/damping_eigval0",_d1))
+  if(!_nh.getParamCached("/lwr/ds_param/damping_eigval0",_d1))
   {
     ROS_ERROR("[SurfacePolishing]: Cannot read first eigen value of passive ds controller");
     return false;
@@ -251,7 +256,7 @@ bool SurfacePolishing::init()
     return false;
   }
 
-  if (_n.ok()) 
+  if (_nh.ok()) 
   { 
     // Wait for poses being published
     ros::spinOnce();
@@ -371,11 +376,11 @@ void SurfacePolishing::updateSurfaceInformation()
       _xProj = _x;
       _xProj(2) = (-_planeNormal(0)*(_xProj(0)-_p3(0))-_planeNormal(1)*(_xProj(1)-_p3(1))+_planeNormal(2)*_p3(2))/_planeNormal(2);
       
-      // Compute _e1 = normal vector pointing towards the surface
-      _e1 = -_planeNormal;
+      // Compute _n = normal vector pointing towards the surface
+      _n = -_planeNormal;
       
       // Compute signed normal distance to the plane
-      _normalDistance = (_xProj-_x).dot(_e1);
+      _normalDistance = (_xProj-_x).dot(_n);
 
       break;
     }
@@ -405,8 +410,8 @@ void SurfacePolishing::updateSurfaceInformation()
       _planeNormal = _svm.calculateGammaDerivative(x.cast<double>()).cast<float>();
       _planeNormal = _wRs*_planeNormal;
       _planeNormal.normalize();
-      _e1 = -_planeNormal;
-      std::cerr << "[SurfacePolishing]: Normal distance: " << _normalDistance << " Normal vector: " << _e1.transpose() << std::endl;    
+      _n = -_planeNormal;
+      std::cerr << "[SurfacePolishing]: Normal distance: " << _normalDistance << " Normal vector: " << _n.transpose() << std::endl;    
 
       break;
     }
@@ -423,7 +428,7 @@ void SurfacePolishing::updateSurfaceInformation()
 
   // Compute normal force
   Eigen::Vector3f F = _filteredWrench.segment(0,3);
-  _normalForce = _e1.dot(-_wRb*F);
+  _normalForce = _n.dot(-_wRb*F);
 
 }
 
@@ -455,11 +460,11 @@ void SurfacePolishing::computeNominalDS()
   }
 
   // The reaching velocity direction is aligned with the normal vector to the surface
-  Eigen::Vector3f v0 = _targetVelocity*_e1;
+  Eigen::Vector3f v0 = _targetVelocity*_n;
  
   // Compute normalized circular dynamics projected onto the surface
   Eigen::Vector3f vdContact;
-  vdContact = (Eigen::Matrix3f::Identity()-_e1*_e1.transpose())*getCircularMotionVelocity(_x,_xAttractor);
+  vdContact = (Eigen::Matrix3f::Identity()-_n*_n.transpose())*getCircularMotionVelocity(_x,_xAttractor);
   vdContact.normalize();
 
   // Compute rotation angle + axis between reaching velocity vector and circular dynamics
@@ -481,13 +486,12 @@ void SurfacePolishing::computeNominalDS()
   }
 
   // Compute nominal DS
-  _fx = R*v0;
+  _fxc.setConstant(0.0f);
+  _fxr = R*v0;
+  _fx = _fxc+_fxr;
       
-  // Bound nominal DS for safety
-  if(_fx.norm()>_velocityLimit)
-  {
-    _fx *= _velocityLimit/_fx.norm();
-  }
+
+
 }
 
 
@@ -514,32 +518,57 @@ Eigen::Vector3f SurfacePolishing::getCircularMotionVelocity(Eigen::Vector3f posi
 
 void SurfacePolishing::updateTankScalars()
 {
-  if(_s>_smax)
-  {
-    _alpha = 0.0f;
-  }
-  else
-  {
-    _alpha = 1.0f;
-  }
   _alpha = Utils::smoothFall(_s,_smax-0.1f*_smax,_smax);
 
-  _pn = _d1*_v.dot(_fx);
+  _pc = _d1*_v.dot(_fxc);
 
-  if(_s < 0.0f && _pn < 0.0f)
+  if(_s < FLT_EPSILON && _pc < FLT_EPSILON)
   {
-    _beta = 0.0f;
+    _betac = 0.0f;
   }
-  else if(_s > _smax && _pn > FLT_EPSILON)
+  else if(_s > _smax && _pc > FLT_EPSILON)
   {
-    _beta = 0.0f;
+    _betac = 0.0f;
   }
   else
   {
-    _beta = 1.0f;
+    _betac = 1.0f;
   }
-  
-  _pf = _Fd*_v.dot(_e1);
+
+  if(_pc>FLT_EPSILON)
+  {
+    _betacp = 1.0f;
+  }
+  else
+  {
+    _betacp = _betac;
+  }
+
+  _pr = _d1*_v.dot(_fxr);
+
+  if(_s < FLT_EPSILON && _pr > FLT_EPSILON)
+  {
+    _betar = 0.0f;
+  }
+  else if(_s > _smax && _pr < FLT_EPSILON)
+  {
+    _betar = 0.0f;
+  }
+  else
+  {
+    _betar = 1.0f;
+  }
+
+  if(_pr<FLT_EPSILON)
+  {
+    _betarp = 1.0f;
+  }
+  else
+  {
+    _betarp = _betar;
+  }
+
+  _pf = _Fd*_v.dot(_n);
   
   if(_s < FLT_EPSILON && _pf > FLT_EPSILON)
   {
@@ -586,26 +615,24 @@ void SurfacePolishing::computeModulatedDS()
   // Update tank scalar variables
   updateTankScalars();
 
+  // Compute corrected force profile and nominal DS
+  _fxp = _betacp*_fxc+_betarp*_fxr;
+  _Fdp = _gammap*_Fd;
+
   // Compute modulation gain
-  float delta = std::pow(2.0f*_e1.dot(_fx)*_gammap*_Fd/_d1,2.0f)+4.0f*std::pow(_fx.norm(),4.0f); 
-  float la;
-  if(fabs(_fx.norm())<FLT_EPSILON)
+  float delta = std::pow(2.0f*_n.dot(_fxp)*_Fdp/_d1,2.0f)+4.0f*std::pow(_fxp.norm(),4.0f); 
+  if(fabs(_fxp.norm())<FLT_EPSILON)
   {
-    la = 0.0f;
+    _lambdaf = 0.0f;
   }
   else
   {
-    la = (-2.0f*_e1.dot(_fx)*_gammap*_Fd/_d1+sqrt(delta))/(2.0f*std::pow(_fx.norm(),2.0f));
-  }
-
-  if(_s < 0.0f && _pn < 0.0f)
-  {
-    la = 1.0f;
+    _lambdaf = (-2.0f*_n.dot(_fxp)*_Fdp/_d1+sqrt(delta))/(2.0f*std::pow(_fxp.norm(),2.0f));
   }
 
   // Update tank dynamics
   _pd = _v.transpose()*_D*_v;
-  float  ds = _dt*(_alpha*_pd-_beta*(la-1.0f)*_pn-_gamma*_pf);
+  float ds = _dt*(_alpha*_pd-_betac*(_lambdaf-1.0f)*_pc-_betar*_lambdaf*_pr-_gamma*_pf);
 
   if(_s+ds>=_smax)
   {
@@ -621,13 +648,13 @@ void SurfacePolishing::computeModulatedDS()
   }
 
   // Update robot's power flow
-  _dW = (la-1.0f)*(1-_beta)*_pn+(_gammap-_gamma)*_pf-(1-_alpha)*_pd;
+  _dW = (_lambdaf-1.0f)*(_betacp-_betac)*_pc+_lambdaf*(_betarp-_betar)*_pr+(_gammap-_gamma)*_pf-(1-_alpha)*_pd;
 
   // Compute modulated DS
-  _vd = la*_fx+_gammap*_Fd*_e1/_d1;
+  _vd = _lambdaf*_fxp+_Fdp*_n/_d1;
 
-  std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd:  " << _gammap*_Fd << " ||fx||: " << _fx.norm() << std::endl;
-  std::cerr << "[SurfacePolishing]: la: " << la << " vd: " << _vd.norm() << std::endl;
+  std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fdp:  " << _Fdp << " ||fx||: " << _fxp.norm() << std::endl;
+  std::cerr << "[SurfacePolishing]: lambdaf: " << _lambdaf << " vd: " << _vd.norm() << std::endl;
   std::cerr << "[SurfacePolishing]: Tank: " << _s  <<" dW: " << _dW <<std::endl;
 
 
@@ -690,18 +717,24 @@ void SurfacePolishing::logData()
   _outputFile << ros::Time::now() << " "
               << _x.transpose() << " "
               << _v.transpose() << " "
-              << _fx.transpose() << " "
+              << _fxc.transpose() << " "
+              << _fxr.transpose() << " "
+              << _fxp.transpose() << " "
               << _vd.transpose() << " "
-              << _e1.transpose() << " "
+              << _n.transpose() << " "
               << _wRb.col(2).transpose() << " "
               << (_markersPosition.col(P1)-_markersPosition.col(ROBOT_BASIS)).transpose() << " "
               << _normalDistance << " "
               << _normalForce << " "
               << _Fd << " "
+              << _lambdaf << " "
               << _sequenceID << " "
               << _s << " " 
               << _alpha << " "
-              << _beta << " "
+              << _betac << " "
+              << _betacp << " "
+              << _betar << " "
+              << _betarp << " "
               << _gamma << " "
               << _gammap << " "
               << _dW << " " << std::endl;
@@ -776,9 +809,9 @@ void SurfacePolishing::publishData()
   p1.x = _x(0);
   p1.y = _x(1);
   p1.z = _x(2);
-  p2.x = _x(0)+0.3f*_e1(0);
-  p2.y = _x(1)+0.3f*_e1(1);
-  p2.z = _x(2)+0.3f*_e1(2);
+  p2.x = _x(0)+0.3f*_n(0);
+  p2.y = _x(1)+0.3f*_n(1);
+  p2.z = _x(2)+0.3f*_n(2);
   _msgArrowMarker.points.push_back(p1);
   _msgArrowMarker.points.push_back(p2);
   _pubMarker.publish(_msgArrowMarker);
