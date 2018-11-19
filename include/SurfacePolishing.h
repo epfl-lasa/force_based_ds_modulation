@@ -165,6 +165,14 @@ class SurfacePolishing
 		std::mutex _mutex;
 		static SurfacePolishing* me;
 
+		Eigen::Matrix3f _L;
+		Eigen::Vector3f _npred;
+
+		float _scale;
+
+	  Eigen::Matrix3f _P;
+  	Eigen::Vector3f _X;
+
 		// Dynamic reconfigure (server+callback)
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig> _dynRecServer;
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig>::CallbackType _dynRecCallback;
@@ -182,6 +190,8 @@ class SurfacePolishing
 		void run();
 
 	private:
+
+		void normalEstimation();
 		
 		// Callback called when CTRL is detected to stop the node
 		static void stopNode(int sig);

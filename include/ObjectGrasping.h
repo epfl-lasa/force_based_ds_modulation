@@ -198,6 +198,9 @@ class ObjectGrasping
     dynamic_reconfigure::Server<force_based_ds_modulation::objectGrasping_paramsConfig> _dynRecServer;
     dynamic_reconfigure::Server<force_based_ds_modulation::objectGrasping_paramsConfig>::CallbackType _dynRecCallback;
 
+    float _scale[NB_ROBOTS];
+
+
   public:
 
     // Class constructor

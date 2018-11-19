@@ -66,6 +66,7 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
     _wrenchCount[k] = 0;
     _wrenchBiasOK[k] = false;
     _d1[k] = 1.0f;
+    _scale[NB_ROBOTS] = 1.0f;
   }
 
   _objectReachable = false;
@@ -140,6 +141,8 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
   _msgMarker.color.g = 0.3f;
   _msgMarker.color.b = 0.9f;
   _msgMarker.color.a = 1.0;
+
+
 }
 
 
@@ -481,6 +484,8 @@ void ObjectGrasping::computeNominalDS()
       {
         _xdD << 0.0f,-1.0f,0.0f;
         _xdD *= 0.20f;
+        _xdD = _xoD; 
+
       }
       else 
       {
@@ -554,6 +559,9 @@ void ObjectGrasping::computeNominalDS()
 
 void ObjectGrasping::updateTankScalars()
 {
+  float dp = 0.01;
+  float ds = 0.1*_smax;
+
   for(int k = 0; k < NB_ROBOTS; k++)
   {
 
@@ -561,75 +569,94 @@ void ObjectGrasping::updateTankScalars()
 
     _pc[k] = _d1[k]*_v[k].dot(_fxc[k]);
 
-    if(_s[k] < FLT_EPSILON && _pc[k] < FLT_EPSILON)
-    {
-      _betac[k] = 0.0f;
-    }
-    else if(_s[k] > _smax && _pc[k] > FLT_EPSILON)
-    {
-      _betac[k] = 0.0f;
-    }
-    else
-    {
-      _betac[k] = 1.0f;
-    }
+    // if(_s[k] < FLT_EPSILON && _pc[k] < FLT_EPSILON)
+    // {
+    //   _betac[k] = 0.0f;
+    // }
+    // else if(_s[k] > _smax && _pc[k] > FLT_EPSILON)
+    // {
+    //   _betac[k] = 0.0f;
+    // }
+    // else
+    // {
+    //   _betac[k] = 1.0f;
+    // }
 
-    if(_pc[k]>FLT_EPSILON)
-    {
-      _betacp[k] = 1.0f;
-    }
-    else
-    {
-      _betacp[k] = _betac[k];
-    }
+    // if(_pc[k]>FLT_EPSILON)
+    // {
+    //   _betacp[k] = 1.0f;
+    // }
+    // else
+    // {
+    //   _betacp[k] = _betac[k];
+    // }
+  
+    _betac[k] = 1-Utils::smoothFall(_pc[k],1*dp,2*dp)*Utils::smoothFall(_s[k],0.0f,ds)
+              -Utils::smoothRise(_pc[k],-2*dp,-1*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
+
+    _betacp[k] = 1-Utils::smoothFall(_pc[k],1*dp,2*dp)*Utils::smoothFall(_s[k],0.0f,ds);
+              // -Utils::smoothRise(_pc[k],-2*dp,-1*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax)*Utils::smoothFall(_pc[k],1*dp,2*dp);
 
     _pr[k] = _d1[k]*_v[k].dot(_fxr[k]);
 
-    if(_s[k] < FLT_EPSILON && _pr[k] > FLT_EPSILON)
-    {
-      _betar[k] = 0.0f;
-    }
-    else if(_s[k] > _smax && _pr[k] < FLT_EPSILON)
-    {
-      _betar[k] = 0.0f;
-    }
-    else
-    {
-      _betar[k] = 1.0f;
-    }
+    // if(_s[k] < FLT_EPSILON && _pr[k] > FLT_EPSILON)
+    // {
+    //   _betar[k] = 0.0f;
+    // }
+    // else if(_s[k] > _smax && _pr[k] < FLT_EPSILON)
+    // {
+    //   _betar[k] = 0.0f;
+    // }
+    // else
+    // {
+    //   _betar[k] = 1.0f;
+    // }
 
-    if(_pr[k]<FLT_EPSILON)
-    {
-      _betarp[k] = 1.0f;
-    }
-    else
-    {
-      _betarp[k] = _betar[k];
-    }
+    // if(_pr[k]<FLT_EPSILON)
+    // {
+    //   _betarp[k] = 1.0f;
+    // }
+    // else
+    // {
+    //   _betarp[k] = _betar[k];
+    // }
+
+    _betar[k] = 1-Utils::smoothRise(_pr[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds)
+              -Utils::smoothFall(_pr[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
+
+    _betarp[k] = 1-Utils::smoothRise(_pr[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds);
+               // -Utils::smoothFall(_pr[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax)*Utils::smoothRise(_pr[k],-2*dp,-1*dp);
+
     
     _pf[k] = _Fd[k]*_v[k].dot(_n[k]);
     
-    if(_s[k] < FLT_EPSILON && _pf[k] > FLT_EPSILON)
-    {
-      _gamma[k] = 0.0f;
-    }
-    else if(_s[k] > _smax && _pf[k] < FLT_EPSILON)
-    {
-      _gamma[k] = 0.0f;
-    }
-    else
-    {
-      _gamma[k] = 1.0f;
-    }
+    // if(_s[k] < FLT_EPSILON && _pf[k] > FLT_EPSILON)
+    // {
+    //   _gamma[k] = 0.0f;
+    // }
+    // else if(_s[k] > _smax && _pf[k] < FLT_EPSILON)
+    // {
+    //   _gamma[k] = 0.0f;
+    // }
+    // else
+    // {
+    //   _gamma[k] = 1.0f;
+    // }
 
-    if(_pf[k]<FLT_EPSILON)
-    {
-      _gammap[k] = 1.0f;
-    }
-    else
-    {
-      _gammap[k] = _gamma[k];
-    }
+    // if(_pf[k]<FLT_EPSILON)
+    // {
+    //   _gammap[k] = 1.0f;
+    // }
+    // else
+    // {
+    //   _gammap[k] = _gamma[k];
+    // }
+  
+    _gamma[k] = 1-Utils::smoothRise(_pf[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds)
+              -Utils::smoothFall(_pf[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
+
+    _gammap[k] = 1-Utils::smoothRise(_pf[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds);
+               // -Utils::smoothFall(_pf[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax)*Utils::smoothRise(_pf[k],-2*dp,-1*dp);
   }
 }
 
@@ -664,6 +691,21 @@ void ObjectGrasping::computeModulatedDS()
         _Fd[k] = _targetForce*alpha;    
       }
     }
+
+    float bou = Utils::smoothRise(_Fd[k],5,8);
+    float dscale = bou*1*(_Fd[k]-_normalForce[k])+(1-bou)*(1-_scale[k]);
+    _scale[k] += _dt*dscale;
+
+    if(_scale[k] > 1.5)
+    {
+      _scale[k] = 1.5f;
+    }
+    else if(_scale[k] < 0.5f)
+    {
+      _scale[k] = 0.5f;
+    }
+
+    // _Fd[k] = _Fd[k]*_scale[k];
   }
 
   // Update tanks' scalar variables
@@ -823,6 +865,10 @@ void ObjectGrasping::logData()
               << _xdD.transpose() << " "
               << (int) _objectGrasped << " "
               << _s[LEFT] << " " 
+              << _pd[LEFT] << " " 
+              << _pc[LEFT] << " " 
+              << _pr[LEFT] << " " 
+              << _pf[LEFT] << " " 
               << _alpha[LEFT] << " "
               << _betac[LEFT] << " "
               << _betacp[LEFT] << " "
@@ -831,7 +877,11 @@ void ObjectGrasping::logData()
               << _gamma[LEFT] << " "
               << _gammap[LEFT] << " "
               << _dW[LEFT] << " "
-              << _s[RIGHT] << " " 
+              << _s[RIGHT] << " "
+              << _pd[RIGHT] << " " 
+              << _pc[RIGHT] << " " 
+              << _pr[RIGHT] << " " 
+              << _pf[RIGHT] << " " 
               << _alpha[RIGHT] << " "
               << _betac[RIGHT] << " "
               << _betacp[RIGHT] << " "

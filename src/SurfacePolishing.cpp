@@ -64,7 +64,7 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _markersSequenceID.setConstant(0);
   _markersTracked.setConstant(0);
 
-  _smax = 4.0f;
+  _smax = 60.0f;
   _s = _smax;
   _dW = 0.0f;
 
@@ -161,6 +161,15 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _msgMarker.points.push_back(p4);
   _msgMarker.points.push_back(p5);
   _msgMarker.points.push_back(p6);
+
+  _scale = 1.0f;
+  _L.setConstant(0.0f);
+  _npred << 0.0f,0.0f,-1.0f;
+  _X = _npred;
+  _P.setConstant(0.0f);
+  _P(0,0) = 0.01f;
+  _P(1,1) = 0.01f;
+  _P(2,2) = 0.01f;
 
 }
 
@@ -277,6 +286,7 @@ void SurfacePolishing::run()
 
   while (!_stop && ros::Time::now().toSec()-_timeInit < _duration) 
   {
+    // std::cerr << ros::Time::now().toSec()-_timeInit << std::endl;
     if(_firstRobotPose && _firstRobotTwist && _wrenchBiasOK &&
        _firstOptitrackPose[ROBOT_BASIS] && _firstOptitrackPose[P1] &&
        _firstOptitrackPose[P2] && _firstOptitrackPose[P3] && _firstDampingMatrix)
@@ -347,6 +357,7 @@ void SurfacePolishing::computeCommand()
 
 void SurfacePolishing::updateSurfaceInformation()
 {
+  normalEstimation();
   switch(_surfaceType)
   {
     case PLANAR:
@@ -378,6 +389,7 @@ void SurfacePolishing::updateSurfaceInformation()
       
       // Compute _n = normal vector pointing towards the surface
       _n = -_planeNormal;
+      _n = _X;
       
       // Compute signed normal distance to the plane
       _normalDistance = (_xProj-_x).dot(_n);
@@ -411,7 +423,6 @@ void SurfacePolishing::updateSurfaceInformation()
       _planeNormal = _wRs*_planeNormal;
       _planeNormal.normalize();
       _n = -_planeNormal;
-      std::cerr << "[SurfacePolishing]: Normal distance: " << _normalDistance << " Normal vector: " << _n.transpose() << std::endl;    
 
       break;
     }
@@ -425,6 +436,8 @@ void SurfacePolishing::updateSurfaceInformation()
   {
     _normalDistance = 0.0f;
   }
+  
+  std::cerr << "[SurfacePolishing]: Normal distance: " << _normalDistance << " Normal vector: " << _n.transpose() << std::endl;    
 
   // Compute normal force
   Eigen::Vector3f F = _filteredWrench.segment(0,3);
@@ -438,8 +451,8 @@ void SurfacePolishing::computeNominalDS()
   // Compute fixed attractor on plane
   if(_surfaceType == PLANAR)
   {
-    _xAttractor = _p1+0.5f*(_p2-_p1)+0.3f*(_p3-_p1);
-    _xAttractor(2) = (-_planeNormal(0)*(_xAttractor(0)-_p1(0))-_planeNormal(1)*(_xAttractor(1)-_p1(1))+_planeNormal(2)*_p1(2))/_planeNormal(2);
+    _xAttractor = _p1+0.45f*(_p2-_p1)+0.5f*(_p3-_p1);
+    // _xAttractor(2) = (-_planeNormal(0)*(_xAttractor(0)-_p1(0))-_planeNormal(1)*(_xAttractor(1)-_p1(1))+_planeNormal(2)*_p1(2))/_planeNormal(2);
   }
   else 
   {
@@ -469,7 +482,18 @@ void SurfacePolishing::computeNominalDS()
 
   // Compute rotation angle + axis between reaching velocity vector and circular dynamics
   float angle = std::acos(v0.normalized().dot(vdContact));
-  float theta = (1.0f-std::tanh(10*_normalDistance))*angle;
+  float theta;
+  // if(_normalForce>2 && _normalDistance < 0.06f)
+  // {
+  //   theta = angle;
+  //   std::cerr << "bou" << std::endl;
+  // }
+  // else
+  // {
+  //   theta = (1.0f-std::tanh(10*_normalDistance))*angle;
+  // }
+    theta = (1.0f-std::tanh(10*_normalDistance))*angle;
+
   Eigen::Vector3f u = (v0.normalized()).cross(vdContact);
 
   // Get corresponding rotation matrix
@@ -522,80 +546,190 @@ void SurfacePolishing::updateTankScalars()
 
   _pc = _d1*_v.dot(_fxc);
 
-  if(_s < FLT_EPSILON && _pc < FLT_EPSILON)
-  {
-    _betac = 0.0f;
-  }
-  else if(_s > _smax && _pc > FLT_EPSILON)
-  {
-    _betac = 0.0f;
-  }
-  else
-  {
-    _betac = 1.0f;
-  }
+  // if(_s < FLT_EPSILON && _pc < FLT_EPSILON)
+  // {
+  //   _betac = 0.0f;
+  // }
+  // else if(_s > _smax && _pc > FLT_EPSILON)
+  // {
+  //   _betac = 0.0f;
+  // }
+  // else
+  // {
+  //   _betac = 1.0f;
+  // }
+  float dp = 0.2;
+  float ds = 0.1*_smax;
+  _betac = 1-Utils::smoothFall(_pc,1*dp,2*dp)*Utils::smoothFall(_s,0.0f,ds)
+            -Utils::smoothRise(_pc,-2*dp,-1*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
-  if(_pc>FLT_EPSILON)
-  {
-    _betacp = 1.0f;
-  }
-  else
-  {
-    _betacp = _betac;
-  }
+  _betacp = 1-Utils::smoothFall(_pc,1*dp,2*dp)*Utils::smoothFall(_s,0.0f,ds);
+            // -Utils::smoothRise(_pc,-2*dp,-1*dp)*Utils::smoothRise(_s,_smax-ds,_smax)*Utils::smoothFall(_pc,1*dp,2*dp);
+
+  // if(_pc>FLT_EPSILON)
+  // {
+  //   _betacp = 1.0f;
+  // }
+  // else
+  // {
+  //   _betacp = _betac;
+  // }
 
   _pr = _d1*_v.dot(_fxr);
 
-  if(_s < FLT_EPSILON && _pr > FLT_EPSILON)
-  {
-    _betar = 0.0f;
-  }
-  else if(_s > _smax && _pr < FLT_EPSILON)
-  {
-    _betar = 0.0f;
-  }
-  else
-  {
-    _betar = 1.0f;
-  }
+  // if(_s < FLT_EPSILON && _pr > FLT_EPSILON)
+  // {
+  //   _betar = 0.0f;
+  // }
+  // else if(_s > _smax && _pr < FLT_EPSILON)
+  // {
+  //   _betar = 0.0f;
+  // }
+  // else
+  // {
+  //   _betar = 1.0f;
+  // }
+  _betar = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
+            -Utils::smoothFall(_pr,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
-  if(_pr<FLT_EPSILON)
-  {
-    _betarp = 1.0f;
-  }
-  else
-  {
-    _betarp = _betar;
-  }
+  _betarp = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+             // -Utils::smoothFall(_pr,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax)*Utils::smoothRise(_pr,-2*dp,-1*dp);
+
+  // if(_pr<FLT_EPSILON)
+  // {
+  //   _betarp = 1.0f;
+  // }
+  // else
+  // {
+  //   _betarp = _betar;
+  // }
 
   _pf = _Fd*_v.dot(_n);
   
-  if(_s < FLT_EPSILON && _pf > FLT_EPSILON)
-  {
-    _gamma = 0.0f;
-  }
-  else if(_s > _smax && _pf < FLT_EPSILON)
-  {
-    _gamma = 0.0f;
-  }
-  else
-  {
-    _gamma = 1.0f;
-  }
+  // if(_s < FLT_EPSILON && _pf > FLT_EPSILON)
+  // {
+  //   _gamma = 0.0f;
+  // }
+  // else if(_s > _smax && _pf < FLT_EPSILON)
+  // {
+  //   _gamma = 0.0f;
+  // }
+  // else
+  // {
+  //   _gamma = 1.0f;
+  // }
 
-  if(_pf<FLT_EPSILON)
-  {
-    _gammap = 1.0f;
-  }
-  else
-  {
-    _gammap = _gamma;
-  }
+  _gamma = 1-Utils::smoothRise(_pf,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
+            -Utils::smoothFall(_pf,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
+
+  _gammap = 1-Utils::smoothRise(_pf,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+             // -Utils::smoothFall(_pf,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax)*Utils::smoothRise(_pf,-2*dp,-1*dp);
+
+
+  // if(_pf<FLT_EPSILON)
+  // {
+  //   _gammap = 1.0f;
+  // }
+  // else
+  // {
+  //   _gammap = _gamma;
+  // }
 }
 
 
+void SurfacePolishing::normalEstimation()
+{
+  Eigen::Vector3f npred_d;
+  Eigen::Matrix3f Ld;
+  float gamma = 1000;
+  float beta = 100;
+  Eigen::Vector3f vtool = _v+_toolOffsetFromEE*_w.cross(_wRb.col(2));
+  std::cerr << vtool.transpose() << std::endl;
+  npred_d = -gamma*(Eigen::Matrix3f::Identity()-_npred*_npred.transpose())*_L*_npred;
+  Ld = -beta*_L+(1.0f/(1.0f+vtool.squaredNorm()))*vtool*vtool.transpose();
+  if(_normalForce>5.0f)
+  {
+    // _npred+= _dt*npred_d;
+    // _L+= _dt*Ld;
+    // _npred = _npred.normalized();
+  }
+
+  bool ok = false;
+  if(_normalForce>5.0f)
+  {
+    Eigen::Vector3f F = -_wRb*_filteredWrench.segment(0,3);
+    if(vtool.norm()>1e-2f)
+    {
+      Eigen::Vector3f t = vtool.normalized();
+      Eigen::Vector3f Fn = (Eigen::Matrix3f::Identity()-t*t.transpose())*F;
+      _npred = Fn.normalized();
+      std::cerr << (t*t.transpose()*F).transpose() << std::endl;
+    //   std::cerr << "A" << std::endl;
+      ok = true;
+    }
+    else
+    {
+      _npred = F.normalized(); 
+    //   std::cerr << "B" << std::endl;
+    }
+
+  //   // Ld = -beta*_L+(1.0f/(1.0f+vtool.squaredNorm()))*vtool*vtool.transpose();
+  //   // npred_d = -gamma*(Eigen::Matrix3f::Identity()-_npred*_npred.transpose())*_L*F.normalized();
+    
+  //   // _L+= _dt*Ld;
+  //   // _npred+= _dt*npred_d;
+  //   // _npred = _npred.normalized();
+
+  }
+  else
+  {
+    _npred << 0.0f,0.0f,-1.0f;
+  }
+
+
+  std::cerr << _L << std::endl << std::endl;
+  std::cerr << _npred.transpose() << std::endl;
+ 
+  // Eigen::Matrix3f A;
+  Eigen::Matrix3f A;
+  A.setIdentity();
+
+  // Eigen::Matrix<float,6,6> Ppred;
+  // Eigen::Matrix<float,6,1> Xpred;
+  Eigen::Matrix3f C;
+  C.setIdentity();
+
+  Eigen::Matrix3f R;
+  R.setConstant(0.0f);
+  R(0,0) = 0.01f;
+  R(1,1) = 0.01f;
+  R(2,2) = 0.01f;
+
+  Eigen::Matrix3f Q;
+  Q.setConstant(0.0f);
+  Q(0,0) = 0.000001f;
+  Q(1,1) = 0.000001f;
+  Q(2,2) = 0.000001f;
+
+ _X = A*_X;  
+ _P = A*_P*A.transpose() + Q;
+ Eigen::Matrix3f G;
+ G = _P*C.transpose()*(C*_P*C.transpose()+R).inverse();
+
+ // if(ok)
+ {
+  _X = _X+G*(_npred-C*_X);
+ }
+ _P = (A-G*C)*_P;
+
+ _X.normalize();
+ std::cerr <<"kalman: " <<_X.transpose() << std::endl;
+  // _npred += _npre
+}
+
 void SurfacePolishing::computeModulatedDS()
 {
+
   // Check the first impedance gain of the DS-impedance controller
   if(_d1<1.0f)
   {
@@ -603,14 +737,27 @@ void SurfacePolishing::computeModulatedDS()
   }
 
   // Compute desired force profile
-  if(_normalForce<5.0f)
-  {
-    _Fd = 5.0f;
-  }
-  else
+  if(_normalForce>2.0f && _normalDistance <0.06f)
   {
     _Fd = _targetForce;
   }
+  else
+  {
+    _Fd = 5.0f;
+  }
+  float bou = Utils::smoothRise(_Fd,5,8);
+  float dscale = bou*1*(_Fd-_normalForce)+(1-bou)*(1-_scale);
+  _scale += _dt*dscale;
+  if(_scale > 2.0)
+  {
+    _scale = 2.0f;
+  }
+  else if(_scale < 0)
+  {
+    _scale = 0.0f;
+  }
+  _Fd = _Fd*_scale;
+  std::cerr << _scale <<" "<< _Fd << std::endl;
 
   // Update tank scalar variables
   updateTankScalars();
@@ -672,8 +819,8 @@ void SurfacePolishing::computeDesiredOrientation()
 {
   // Compute rotation error between current orientation and plane orientation using Rodrigues' law
   Eigen::Vector3f k;
-  k = (-_wRb.col(2)).cross(_planeNormal);
-  float c = (-_wRb.col(2)).transpose()*_planeNormal;  
+  k = (-_wRb.col(2)).cross(-_X);
+  float c = (-_wRb.col(2)).transpose()*(-_X);  
   float s = k.norm();
   k /= s;
   
@@ -701,7 +848,7 @@ void SurfacePolishing::computeDesiredOrientation()
 
   // Perform quaternion slerp interpolation to progressively orient the end effector while approaching the surface
   _qd = Utils::slerpQuaternion(_q,qf,1.0f-std::tanh(5.0f*_normalDistance));
-
+  _qd = qf;
   // Compute needed angular velocity to perform the desired quaternion
   Eigen::Vector4f qcurI, wq;
   qcurI(0) = _q(0);
@@ -730,6 +877,10 @@ void SurfacePolishing::logData()
               << _lambdaf << " "
               << _sequenceID << " "
               << _s << " " 
+              << _pd << " " 
+              << _pc << " " 
+              << _pr << " " 
+              << _pf << " " 
               << _alpha << " "
               << _betac << " "
               << _betacp << " "
@@ -809,9 +960,9 @@ void SurfacePolishing::publishData()
   p1.x = _x(0);
   p1.y = _x(1);
   p1.z = _x(2);
-  p2.x = _x(0)+0.3f*_n(0);
-  p2.y = _x(1)+0.3f*_n(1);
-  p2.z = _x(2)+0.3f*_n(2);
+  p2.x = _x(0)+0.3f*_X(0);
+  p2.y = _x(1)+0.3f*_X(1);
+  p2.z = _x(2)+0.3f*_X(2);
   _msgArrowMarker.points.push_back(p1);
   _msgArrowMarker.points.push_back(p2);
   _pubMarker.publish(_msgArrowMarker);
