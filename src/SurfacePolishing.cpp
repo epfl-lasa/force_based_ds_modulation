@@ -11,14 +11,16 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _fileName(fileName),
   _surfaceType(surfaceType),
   _targetVelocity(targetVelocity),
-  _targetForce(targetForce)
+  _targetForce(targetForce),
+  _gpr(new GaussianProcessRegression<float>(3,3))
 {
   me = this;
 
+  _gpr->SetHyperParams(0.2f, 1.0f, 0.2f);
   _gravity << 0.0f, 0.0f, -9.80665f;
   _toolComPositionFromSensor << 0.0f,0.0f,0.02f;
   _toolOffsetFromEE = 0.15f;
-  _toolMass = 0.0f;
+  _toolMass = 0.07f;
 
   _x.setConstant(0.0f);
   _q.setConstant(0.0f);
@@ -166,11 +168,12 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _L.setConstant(0.0f);
   _npred << 0.0f,0.0f,-1.0f;
   _X = _npred;
+  _Xgpr = _X;
   _P.setConstant(0.0f);
   _P(0,0) = 0.01f;
   _P(1,1) = 0.01f;
   _P(2,2) = 0.01f;
-
+  _Fds = 0.0f;
 }
 
 
@@ -357,7 +360,7 @@ void SurfacePolishing::computeCommand()
 
 void SurfacePolishing::updateSurfaceInformation()
 {
-  normalEstimation();
+  // normalEstimation();
   switch(_surfaceType)
   {
     case PLANAR:
@@ -389,7 +392,8 @@ void SurfacePolishing::updateSurfaceInformation()
       
       // Compute _n = normal vector pointing towards the surface
       _n = -_planeNormal;
-      _n = _X;
+      _planeNormal = -_Xgpr;
+      _n = _Xgpr;
       
       // Compute signed normal distance to the plane
       _normalDistance = (_xProj-_x).dot(_n);
@@ -457,6 +461,7 @@ void SurfacePolishing::computeNominalDS()
   else 
   {
     _xAttractor = _p1+0.45f*(_p2-_p1)+0.5f*(_p3-_p1);
+    std::cerr << _xAttractor.transpose() << std::endl;
     // _xAttractor += _offset;
 
     // Compute normal distance and vector at the attractor location in the surface frame
@@ -483,16 +488,16 @@ void SurfacePolishing::computeNominalDS()
   // Compute rotation angle + axis between reaching velocity vector and circular dynamics
   float angle = std::acos(v0.normalized().dot(vdContact));
   float theta;
-  // if(_normalForce>2 && _normalDistance < 0.06f)
-  // {
-  //   theta = angle;
-  //   std::cerr << "bou" << std::endl;
-  // }
-  // else
-  // {
-  //   theta = (1.0f-std::tanh(10*_normalDistance))*angle;
-  // }
+  if(_normalForce>2 && _normalDistance < 0.06f)
+  {
+    theta = angle;
+    std::cerr << "bou" << std::endl;
+  }
+  else
+  {
     theta = (1.0f-std::tanh(10*_normalDistance))*angle;
+  }
+    // theta = (1.0f-std::tanh(10*_normalDistance))*angle;
 
   Eigen::Vector3f u = (v0.normalized()).cross(vdContact);
 
@@ -535,6 +540,8 @@ Eigen::Vector3f SurfacePolishing::getCircularMotionVelocity(Eigen::Vector3f posi
 
   velocity(0) = -(R-r) * cos(T) - R * omega * sin(T);
   velocity(1) = -(R-r) * sin(T) + R * omega * cos(T);
+
+  _Fds = 5*cos(T)+15;
 
   return velocity;
 }
@@ -642,7 +649,7 @@ void SurfacePolishing::normalEstimation()
   Eigen::Vector3f npred_d;
   Eigen::Matrix3f Ld;
   float gamma = 1000;
-  float beta = 100;
+  float beta = 1;
   Eigen::Vector3f vtool = _v+_toolOffsetFromEE*_w.cross(_wRb.col(2));
   std::cerr << vtool.transpose() << std::endl;
   npred_d = -gamma*(Eigen::Matrix3f::Identity()-_npred*_npred.transpose())*_L*_npred;
@@ -650,7 +657,7 @@ void SurfacePolishing::normalEstimation()
   if(_normalForce>5.0f)
   {
     // _npred+= _dt*npred_d;
-    // _L+= _dt*Ld;
+    _L+= _dt*Ld;
     // _npred = _npred.normalized();
   }
 
@@ -663,9 +670,8 @@ void SurfacePolishing::normalEstimation()
       Eigen::Vector3f t = vtool.normalized();
       Eigen::Vector3f Fn = (Eigen::Matrix3f::Identity()-t*t.transpose())*F;
       _npred = Fn.normalized();
-      std::cerr << (t*t.transpose()*F).transpose() << std::endl;
+      // std::cerr << (t*t.transpose()*F).transpose() << std::endl;
     //   std::cerr << "A" << std::endl;
-      ok = true;
     }
     else
     {
@@ -673,6 +679,7 @@ void SurfacePolishing::normalEstimation()
     //   std::cerr << "B" << std::endl;
     }
 
+      ok = true;
   //   // Ld = -beta*_L+(1.0f/(1.0f+vtool.squaredNorm()))*vtool*vtool.transpose();
   //   // npred_d = -gamma*(Eigen::Matrix3f::Identity()-_npred*_npred.transpose())*_L*F.normalized();
     
@@ -683,17 +690,24 @@ void SurfacePolishing::normalEstimation()
   }
   else
   {
-    _npred << 0.0f,0.0f,-1.0f;
+    // _npred << 0.0f,0.0f,-1.0f;
   }
 
 
-  std::cerr << _L << std::endl << std::endl;
-  std::cerr << _npred.transpose() << std::endl;
+  // std::cerr << _L << std::endl << std::endl;
+  // std::cerr << _npred.transpose() << std::endl;
  
   // Eigen::Matrix3f A;
-  Eigen::Matrix3f A;
+  Eigen::Matrix3f A,Ap;
   A.setIdentity();
-
+  
+ // if(vtool.norm()> 0.01f && _normalForce>5.0f)
+ // {
+ //    Ap.col(0) = -2*vtool(0)*vtool.normalized();
+ //    Ap.col(1) = -2*vtool(1)*vtool.normalized();
+ //    Ap.col(2) = -2*vtool(2)*vtool.normalized();
+ //    A = A+_dt*Ap;
+ //  }
   // Eigen::Matrix<float,6,6> Ppred;
   // Eigen::Matrix<float,6,1> Xpred;
   Eigen::Matrix3f C;
@@ -701,30 +715,82 @@ void SurfacePolishing::normalEstimation()
 
   Eigen::Matrix3f R;
   R.setConstant(0.0f);
-  R(0,0) = 0.01f;
-  R(1,1) = 0.01f;
-  R(2,2) = 0.01f;
+  R(0,0) = 0.1f;
+  R(1,1) = 0.1f;
+  R(2,2) = 0.1f;
 
   Eigen::Matrix3f Q;
   Q.setConstant(0.0f);
-  Q(0,0) = 0.000001f;
-  Q(1,1) = 0.000001f;
-  Q(2,2) = 0.000001f;
+  Q(0,0) = 0.00001f;
+  Q(1,1) = 0.00001f;
+  Q(2,2) = 0.00001f;
 
- _X = A*_X;  
- _P = A*_P*A.transpose() + Q;
- Eigen::Matrix3f G;
- G = _P*C.transpose()*(C*_P*C.transpose()+R).inverse();
+  _X = A*_X;  
+  _P = A*_P*A.transpose() + Q;
+  Eigen::Matrix3f G;
+  G = _P*C.transpose()*(C*_P*C.transpose()+R).inverse();
 
- // if(ok)
- {
-  _X = _X+G*(_npred-C*_X);
- }
- _P = (A-G*C)*_P;
+  if(ok)
+  {
+    _X = _X+G*(_npred-C*_X);
+    _P = (A-G*C)*_P;
+  }
 
- _X.normalize();
- std::cerr <<"kalman: " <<_X.transpose() << std::endl;
+  _X.normalize();
+
+
+  //  _X -=_X.dot(vtool)*vtool.normalized();
+  //  _X.normalize();
+  // }
+  std::cerr <<"kalman: " <<_X.transpose() << std::endl;
+
+  Eigen::Vector3f theta;
+  float variance = 1.0f;
+  float angle1;
+  float angle2;
+  if(_gpr->get_n_data()==0)
+  {
+    _gpr->AddTrainingData(_x,_X);
+    _Xgpr = _X; 
+  }
+  else
+  {
+
+    Eigen::Vector3f k;
+    theta = _gpr->DoRegression(_x);
+    theta.normalize();
+    angle1 = std::acos(_X.dot(_npred));
+    angle2 = std::acos(_npred.dot(theta));
+    if(fabs(angle2)>10*M_PI/180.0f)
+    {
+      _gpr->AddTrainingData(_x,_npred);
+    }
+    else
+    {
+    }
+    std::cerr << "ANGLE: " << fabs(angle2)*180/M_PI<< std::endl;
+    theta = _gpr->DoRegression(_x,variance);
+    theta.normalize();
+    if(variance<0.1f && _gpr->get_n_data()>5)
+    {
+      _Xgpr = theta;
+    }
+    else
+    {
+      _Xgpr = _X; 
+    }    
+  }
+
+  _Xgpr = _X;
+  std::cerr << "variance: " << variance << " " << _gpr->get_n_data() << std::endl;
+
   // _npred += _npre
+
+  // _gpr->AddTrainingData(_x,_npred);
+  std::cerr << _Xgpr.transpose() << std::endl;
+
+
+
 }
 
 void SurfacePolishing::computeModulatedDS()
@@ -740,23 +806,24 @@ void SurfacePolishing::computeModulatedDS()
   if(_normalForce>2.0f && _normalDistance <0.06f)
   {
     _Fd = _targetForce;
+    _Fd = _Fds;
   }
   else
   {
     _Fd = 5.0f;
   }
   float bou = Utils::smoothRise(_Fd,5,8);
-  float dscale = bou*1*(_Fd-_normalForce)+(1-bou)*(1-_scale);
+  float dscale = bou*0.5f*(_Fd-_normalForce)+(1-bou)*(_scale);
   _scale += _dt*dscale;
-  if(_scale > 2.0)
+  if(_scale > 0.5*_Fd)
   {
-    _scale = 2.0f;
+    _scale = 0.5*_Fd;
   }
-  else if(_scale < 0)
+  else if(_scale < -0.5*_Fd)
   {
-    _scale = 0.0f;
+    _scale = -0.5*_Fd;
   }
-  _Fd = _Fd*_scale;
+  // _Fd = (_Fd+_scale);
   std::cerr << _scale <<" "<< _Fd << std::endl;
 
   // Update tank scalar variables
@@ -764,7 +831,7 @@ void SurfacePolishing::computeModulatedDS()
 
   // Compute corrected force profile and nominal DS
   _fxp = _betacp*_fxc+_betarp*_fxr;
-  _Fdp = _gammap*_Fd;
+  _Fdp = _gammap*(_Fd+_scale);
 
   // Compute modulation gain
   float delta = std::pow(2.0f*_n.dot(_fxp)*_Fdp/_d1,2.0f)+4.0f*std::pow(_fxp.norm(),4.0f); 
@@ -819,8 +886,8 @@ void SurfacePolishing::computeDesiredOrientation()
 {
   // Compute rotation error between current orientation and plane orientation using Rodrigues' law
   Eigen::Vector3f k;
-  k = (-_wRb.col(2)).cross(-_X);
-  float c = (-_wRb.col(2)).transpose()*(-_X);  
+  k = (-_wRb.col(2)).cross(_planeNormal);
+  float c = (-_wRb.col(2)).transpose()*(_planeNormal);  
   float s = k.norm();
   k /= s;
   
@@ -848,7 +915,7 @@ void SurfacePolishing::computeDesiredOrientation()
 
   // Perform quaternion slerp interpolation to progressively orient the end effector while approaching the surface
   _qd = Utils::slerpQuaternion(_q,qf,1.0f-std::tanh(5.0f*_normalDistance));
-  _qd = qf;
+  // _qd = qf;
   // Compute needed angular velocity to perform the desired quaternion
   Eigen::Vector4f qcurI, wq;
   qcurI(0) = _q(0);
@@ -960,9 +1027,9 @@ void SurfacePolishing::publishData()
   p1.x = _x(0);
   p1.y = _x(1);
   p1.z = _x(2);
-  p2.x = _x(0)+0.3f*_X(0);
-  p2.y = _x(1)+0.3f*_X(1);
-  p2.z = _x(2)+0.3f*_X(2);
+  p2.x = _x(0)+0.3f*_Xgpr(0);
+  p2.y = _x(1)+0.3f*_Xgpr(1);
+  p2.z = _x(2)+0.3f*_Xgpr(2);
   _msgArrowMarker.points.push_back(p1);
   _msgArrowMarker.points.push_back(p2);
   _pubMarker.publish(_msgArrowMarker);

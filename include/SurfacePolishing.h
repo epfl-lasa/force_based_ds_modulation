@@ -23,6 +23,8 @@
 #include "force_based_ds_modulation/surfacePolishing_paramsConfig.h"
 #include "Eigen/Eigen"
 #include "svm_grad.h"
+#include "gaussian_process_regression/gaussian_process_regression.h"
+
 
 #define NB_SAMPLES 50
 #define AVERAGE_COUNT 100
@@ -172,10 +174,15 @@ class SurfacePolishing
 
 	  Eigen::Matrix3f _P;
   	Eigen::Vector3f _X;
+  	Eigen::Vector3f _Xgpr;
 
+  	float _Fds;
 		// Dynamic reconfigure (server+callback)
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig> _dynRecServer;
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig>::CallbackType _dynRecCallback;
+
+		std::shared_ptr<GaussianProcessRegression<float> > _gpr;
+
 
 	public:
 

@@ -48,6 +48,7 @@
   <build_depend>svm_grad</build_depend>
   <build_depend>sg_differentiation</build_depend>
   <build_depend>utils</build_depend>
+  <build_depend>gaussian_process_regression</build_depend>
 
   <run_depend>roscpp</run_depend>
   <run_depend>rospy</run_depend>
@@ -58,6 +59,7 @@
   <run_depend>svm_grad</run_depend>
   <run_depend>sg_differentiation</run_depend>
   <run_depend>utils</run_depend>
+  <run_depend>gaussian_process_regression</run_depend>
 
 <!--   <run_depend>message_runtime</run_depend>
  -->
