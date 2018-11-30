@@ -24,6 +24,7 @@
 #include "Eigen/Eigen"
 #include "svm_grad.h"
 #include "gaussian_process_regression/gaussian_process_regression.h"
+#include <lwr_controllers/ContactTaskMsg.h>
 
 
 #define NB_SAMPLES 50
@@ -58,6 +59,7 @@ class SurfacePolishing
 		ros::Publisher _pubMarker;						  		// Marker (RVIZ) 
 		ros::Publisher _pubTaskAttractor;						// Attractor on surface (RVIZ)
 		ros::Publisher _pubNormalForce;							// Measured normal force to the surface
+		ros::Publisher _pubContactTask;							// Measured normal force to the surface
 		
 		// Messages declaration
 		geometry_msgs::Pose _msgRealPose;
@@ -68,6 +70,7 @@ class SurfacePolishing
 		visualization_msgs::Marker _msgArrowMarker;
 		geometry_msgs::PointStamped _msgTaskAttractor;
 		geometry_msgs::WrenchStamped _msgFilteredWrench;
+		lwr_controllers::ContactTaskMsg _msgContactTask;
 		
 		// Tool characteristics
 		float _toolMass;														// Tool mass [kg]
@@ -177,11 +180,16 @@ class SurfacePolishing
   	Eigen::Vector3f _Xgpr;
 
   	float _Fds;
+
+  	float _sigmaC;
+  	float _deltaf;
 		// Dynamic reconfigure (server+callback)
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig> _dynRecServer;
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig>::CallbackType _dynRecCallback;
 
 		std::shared_ptr<GaussianProcessRegression<float> > _gpr;
+
+		float _gain = 0.0f;
 
 
 	public:

@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   sg_differentiation
   utils
   gaussian_process_regression
+  lwr_controllers
 )
 
 find_package(Eigen 3 QUIET) 
@@ -35,7 +36,7 @@ generate_dynamic_reconfigure_options(cfg/surfacePolishing_params.cfg
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ${PROJECT_NAME}
-  CATKIN_DEPENDS roscpp rospy std_msgs message_generation kdl_parser dynamic_reconfigure svm_grad sg_differentiation utils gaussian_process_regression
+  CATKIN_DEPENDS roscpp rospy std_msgs message_generation kdl_parser dynamic_reconfigure svm_grad sg_differentiation utils gaussian_process_regression lwr_controllers
   # DEPENDS Eigen
  )
 

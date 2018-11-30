@@ -174,6 +174,8 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _P(1,1) = 0.01f;
   _P(2,2) = 0.01f;
   _Fds = 0.0f;
+  _sigmaC = 0.0f;
+  _deltaf = 0.0f;
 }
 
 
@@ -196,6 +198,7 @@ bool SurfacePolishing::init()
   _pubMarker = _nh.advertise<visualization_msgs::Marker>("SurfacePolishing/plane", 1);
   _pubTaskAttractor = _nh.advertise<geometry_msgs::PointStamped>("SurfacePolishing/taskAttractor", 1);  
   _pubNormalForce = _nh.advertise<std_msgs::Float32>("SurfacePolishing/normalForce", 1);
+  _pubContactTask = _nh.advertise<lwr_controllers::ContactTaskMsg>("/lwr/joint_controllers/passive_ds_command_contact_task", 1);
 
   // Dynamic reconfigure definition
   _dynRecCallback = boost::bind(&SurfacePolishing::dynamicReconfigureCallback, this, _1, _2);
@@ -329,6 +332,8 @@ void SurfacePolishing::run()
   _vd.setConstant(0.0f);
   _omegad.setConstant(0.0f);
   _qd = _q;
+  _gain = 0.0f;
+  _n.setConstant(0.0f);
 
   publishData();
   ros::spinOnce();
@@ -460,7 +465,7 @@ void SurfacePolishing::computeNominalDS()
   }
   else 
   {
-    _xAttractor = _p1+0.45f*(_p2-_p1)+0.5f*(_p3-_p1);
+    _xAttractor = _p1+0.48f*(_p2-_p1)+0.5f*(_p3-_p1);
     std::cerr << _xAttractor.transpose() << std::endl;
     // _xAttractor += _offset;
 
@@ -553,94 +558,26 @@ void SurfacePolishing::updateTankScalars()
 
   _pc = _d1*_v.dot(_fxc);
 
-  // if(_s < FLT_EPSILON && _pc < FLT_EPSILON)
-  // {
-  //   _betac = 0.0f;
-  // }
-  // else if(_s > _smax && _pc > FLT_EPSILON)
-  // {
-  //   _betac = 0.0f;
-  // }
-  // else
-  // {
-  //   _betac = 1.0f;
-  // }
   float dp = 0.2;
   float ds = 0.1*_smax;
   _betac = 1-Utils::smoothFall(_pc,1*dp,2*dp)*Utils::smoothFall(_s,0.0f,ds)
             -Utils::smoothRise(_pc,-2*dp,-1*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
   _betacp = 1-Utils::smoothFall(_pc,1*dp,2*dp)*Utils::smoothFall(_s,0.0f,ds);
-            // -Utils::smoothRise(_pc,-2*dp,-1*dp)*Utils::smoothRise(_s,_smax-ds,_smax)*Utils::smoothFall(_pc,1*dp,2*dp);
-
-  // if(_pc>FLT_EPSILON)
-  // {
-  //   _betacp = 1.0f;
-  // }
-  // else
-  // {
-  //   _betacp = _betac;
-  // }
 
   _pr = _d1*_v.dot(_fxr);
 
-  // if(_s < FLT_EPSILON && _pr > FLT_EPSILON)
-  // {
-  //   _betar = 0.0f;
-  // }
-  // else if(_s > _smax && _pr < FLT_EPSILON)
-  // {
-  //   _betar = 0.0f;
-  // }
-  // else
-  // {
-  //   _betar = 1.0f;
-  // }
   _betar = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
             -Utils::smoothFall(_pr,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
   _betarp = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
-             // -Utils::smoothFall(_pr,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax)*Utils::smoothRise(_pr,-2*dp,-1*dp);
-
-  // if(_pr<FLT_EPSILON)
-  // {
-  //   _betarp = 1.0f;
-  // }
-  // else
-  // {
-  //   _betarp = _betar;
-  // }
 
   _pf = _Fd*_v.dot(_n);
-  
-  // if(_s < FLT_EPSILON && _pf > FLT_EPSILON)
-  // {
-  //   _gamma = 0.0f;
-  // }
-  // else if(_s > _smax && _pf < FLT_EPSILON)
-  // {
-  //   _gamma = 0.0f;
-  // }
-  // else
-  // {
-  //   _gamma = 1.0f;
-  // }
 
   _gamma = 1-Utils::smoothRise(_pf,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
             -Utils::smoothFall(_pf,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
   _gammap = 1-Utils::smoothRise(_pf,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
-             // -Utils::smoothFall(_pf,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax)*Utils::smoothRise(_pf,-2*dp,-1*dp);
-
-
-  // if(_pf<FLT_EPSILON)
-  // {
-  //   _gammap = 1.0f;
-  // }
-  // else
-  // {
-  //   _gammap = _gamma;
-  // }
 }
 
 
@@ -806,7 +743,7 @@ void SurfacePolishing::computeModulatedDS()
   if(_normalForce>2.0f && _normalDistance <0.06f)
   {
     _Fd = _targetForce;
-    _Fd = _Fds;
+    // _Fd = _Fds;
   }
   else
   {
@@ -823,15 +760,74 @@ void SurfacePolishing::computeModulatedDS()
   {
     _scale = -0.5*_Fd;
   }
-  // _Fd = (_Fd+_scale);
-  std::cerr << _scale <<" "<< _Fd << std::endl;
 
+  // _Fd = (_Fd+_scale);
+  std::cerr << "_deltaF: "<<_scale <<" "<< _Fd << std::endl;
+
+  Eigen::Vector3f t;
+  if(_fxr.norm()>1e-3f)
+  {
+    t = _fxr/_fxr.norm();
+  }
+  else
+  {
+    t.setConstant(0.0f);
+  }
+
+
+
+  if(_normalForce>5.0f)
+  {
+    // _deltaf += _dt*5.0f*((1.0f-_deltaf)*_fxr.squaredNorm()-((Eigen::Matrix3f::Identity()-_n*_n.transpose())*_v).dot(_fxr));  
+    // _deltaf += _dt*5.0f*((1.0f-_deltaf)*_fxr.squaredNorm()-((Eigen::Matrix3f::Identity()-_n*_n.transpose())*_v).dot(_fxr));  
+    // _deltaf += _dt*0.5f*(_fxr.norm()-_v.norm()-_deltaf);  
+    // _deltaf += _dt*0.5f*(_fxr.norm()-_v.norm()*_v.dot(_fxr)/(_fxr.norm()*_v.norm())-_deltaf);  
+    // _deltaf += _dt*0.5f*(_fxr.norm()-((Eigen::Matrix3f::Identity()-_n*_n.transpose())*_v).norm()-_deltaf);  
+    _deltaf += _dt*0.5f*(_fxr.dot(t)-_v.dot(t));  
+    if(_deltaf>_fxr.norm())
+    {
+      _deltaf = _fxr.norm();
+    }
+    else
+    {
+      if(_deltaf<-_fxr.norm())
+      {
+        _deltaf = -_fxr.norm();
+      }
+    }
+
+    // if(_deltaf>1)
+    // {
+    //   _deltaf = 1;
+    // }
+    // else
+    // {
+    //   if(_deltaf<-1)
+    //   {
+    //     _deltaf = -1;
+    //   }
+    // }
+    std::cerr << "_deltaf: "<< _deltaf << " " << (1.0f-_deltaf)*_fxr.squaredNorm()-((Eigen::Matrix3f::Identity()-_n*_n.transpose())*_v).dot(_fxr) <<std::endl;
+    std::cerr << "_deltaf: "<< _deltaf << " " << _fxr.norm()-_v.norm() <<std::endl;
+
+  }
+
+  if(_normalDistance<0.01f && _normalForce>2.0f)
+  {
+    _gain = 1;
+  }
+  else
+  {
+    _gain = 0.0f;
+  }
+  // _gain = 0.0f;
   // Update tank scalar variables
   updateTankScalars();
 
   // Compute corrected force profile and nominal DS
   _fxp = _betacp*_fxc+_betarp*_fxr;
   _Fdp = _gammap*(_Fd+_scale);
+  // _Fdp = _gammap*_Fd;
 
   // Compute modulation gain
   float delta = std::pow(2.0f*_n.dot(_fxp)*_Fdp/_d1,2.0f)+4.0f*std::pow(_fxp.norm(),4.0f); 
@@ -865,7 +861,9 @@ void SurfacePolishing::computeModulatedDS()
   _dW = (_lambdaf-1.0f)*(_betacp-_betac)*_pc+_lambdaf*(_betarp-_betar)*_pr+(_gammap-_gamma)*_pf-(1-_alpha)*_pd;
 
   // Compute modulated DS
-  _vd = _lambdaf*_fxp+_Fdp*_n/_d1;
+  // _vd = _lambdaf*_fxp+_Fdp*_n/_d1;
+  // _vd = (1+_deltaf)*_fxr+_Fdp*_n/_d1;
+  _vd = _fxr+_deltaf*t+_Fdp*_n/_d1;
 
   std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fdp:  " << _Fdp << " ||fx||: " << _fxp.norm() << std::endl;
   std::cerr << "[SurfacePolishing]: lambdaf: " << _lambdaf << " vd: " << _vd.norm() << std::endl;
@@ -962,24 +960,42 @@ void SurfacePolishing::logData()
 void SurfacePolishing::publishData()
 {
   // Publish desired twist (passive ds controller)
-  _msgDesiredTwist.linear.x  = _vd(0);
-  _msgDesiredTwist.linear.y  = _vd(1);
-  _msgDesiredTwist.linear.z  = _vd(2);
+  // _msgDesiredTwist.linear.x  = _vd(0);
+  // _msgDesiredTwist.linear.y  = _vd(1);
+  // _msgDesiredTwist.linear.z  = _vd(2);
 
-  // Convert desired end effector frame angular velocity to world frame
-  _msgDesiredTwist.angular.x = _omegad(0);
-  _msgDesiredTwist.angular.y = _omegad(1);
-  _msgDesiredTwist.angular.z = _omegad(2);
+  // // Convert desired end effector frame angular velocity to world frame
+  // _msgDesiredTwist.angular.x = _omegad(0);
+  // _msgDesiredTwist.angular.y = _omegad(1);
+  // _msgDesiredTwist.angular.z = _omegad(2);
 
-  _pubDesiredTwist.publish(_msgDesiredTwist);
+  // _pubDesiredTwist.publish(_msgDesiredTwist);
 
-  // Publish desired orientation
-  _msgDesiredOrientation.w = _qd(0);
-  _msgDesiredOrientation.x = _qd(1);
-  _msgDesiredOrientation.y = _qd(2);
-  _msgDesiredOrientation.z = _qd(3);
+  // // Publish desired orientation
+  // _msgDesiredOrientation.w = _qd(0);
+  // _msgDesiredOrientation.x = _qd(1);
+  // _msgDesiredOrientation.y = _qd(2);
+  // _msgDesiredOrientation.z = _qd(3);
 
-  _pubDesiredOrientation.publish(_msgDesiredOrientation);
+  // _pubDesiredOrientation.publish(_msgDesiredOrientation);
+
+  _msgContactTask.twist.linear.x  = _vd(0);
+  _msgContactTask.twist.linear.y  = _vd(1);
+  _msgContactTask.twist.linear.z  = _vd(2);
+  _msgContactTask.twist.angular.x = _omegad(0);
+  _msgContactTask.twist.angular.y = _omegad(1);
+  _msgContactTask.twist.angular.z = _omegad(2);
+  _msgContactTask.quaternion.w = _qd(0);
+  _msgContactTask.quaternion.x = _qd(1);
+  _msgContactTask.quaternion.y = _qd(2);
+  _msgContactTask.quaternion.z = _qd(3);
+  _msgContactTask.n.x = _n(0);
+  _msgContactTask.n.y = _n(1);
+  _msgContactTask.n.z = _n(2);
+  std::cerr << "gain: "<< _gain << std::endl;
+  _msgContactTask.gain = _gain;
+
+  _pubContactTask.publish(_msgContactTask);
 
   _msgTaskAttractor.header.frame_id = "world";
   _msgTaskAttractor.header.stamp = ros::Time::now();
