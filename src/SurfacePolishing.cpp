@@ -329,6 +329,7 @@ void SurfacePolishing::run()
   _timeInit = ros::Time::now().toSec();
 
   while (!_stop && ros::Time::now().toSec()-_timeInit < _duration) 
+  // while (!_stop) 
   {
     if(_firstRobotPose && _firstRobotTwist && _wrenchBiasOK &&
        _firstOptitrackPose[ROBOT_BASIS] && _firstOptitrackPose[P1] &&
@@ -531,24 +532,46 @@ void SurfacePolishing::updateContactState()
 {
 
   float average = 0.0f;
-  
-  if(_normalForceWindow.size()<WINDOW_SIZE)
+  if(_adaptNormalModulation)
   {
-    _normalForceWindow.push_back(_normalForce);
-    _sigmac = 0.0f;
+    
+    if(_normalForceWindow.size()<WINDOW_SIZE)
+    {
+      _normalForceWindow.push_back(_normalForce);
+      _sigmac = 0.0f;
+    }
+    else
+    {
+      _normalForceWindow.pop_front();
+      _normalForceWindow.push_back(_normalForce);
+      float average = 0.0f;
+      for(int k = 0; k < WINDOW_SIZE; k++)
+      {
+        average+=_normalForceWindow[k];
+      }
+      average /= WINDOW_SIZE;
+      if(average>3.0f && _normalDistance < 0.05f)
+      {
+        if(_sigmac < FLT_EPSILON)
+        {
+          _timeInit = ros::Time::now().toSec();;
+        }
+        _sigmac = 1.0f;
+      }
+      // else
+      // {
+      //   _sigmac = 0.0f;
+      // }
+    }
   }
   else
   {
-    _normalForceWindow.pop_front();
-    _normalForceWindow.push_back(_normalForce);
-    float average = 0.0f;
-    for(int k = 0; k < WINDOW_SIZE; k++)
+    if(_normalDistance<_normalDistanceTolerance)
     {
-      average+=_normalForceWindow[k];
-    }
-    average /= WINDOW_SIZE;
-    if(average>3.0f)
-    {
+      if(_sigmac < FLT_EPSILON)
+      {
+        _timeInit = ros::Time::now().toSec();;
+      }
       _sigmac = 1.0f;
     }
     else
@@ -558,14 +581,6 @@ void SurfacePolishing::updateContactState()
   }
 
 
-  if(_normalDistance<_normalDistanceTolerance)
-  {
-    _sigmac = 1.0f;
-  }
-  else
-  {
-    _sigmac = 0.0f;
-  }
   _normalDistance*=(1-_sigmac);
 
   std::cerr << "[SurfacePolishing]: sigmac: " << _sigmac << " average: " << average <<std::endl;
@@ -645,6 +660,7 @@ void SurfacePolishing::computeNominalDS()
 void SurfacePolishing::computeDesiredContactForceProfile()
 {
   _Fd = _targetForce;
+  _Fd = _Fds;
 }
 
 void SurfacePolishing::computeModulationTerms()
@@ -749,6 +765,7 @@ void SurfacePolishing::computeModulatedDS()
   {
     _gain = 0.0f;
   }
+  // _gain = 0.0f;
 
   // Update tank scalar variables
   updateTankScalars();
