@@ -12,8 +12,10 @@ int main(int argc, char **argv)
   std::string filename;
   ObjectGrasping::Mode mode;
 
+  bool adaptNormalModulation;
+
   // rosrun motion_force_control modualtedDS fileName -u y/n -o c/a -m r/fr -f f1/f2/f3 -c v/a 
-  if(argc == 6) 
+  if(argc == 8) 
   {
     filename = std::string(argv[1]);
 
@@ -27,7 +29,7 @@ int main(int argc, char **argv)
     }
     else
     {
-      ROS_ERROR("Wrong contact dynamics arguments, the command line arguments should be: fileName -m(mode) rg(reaching and grasping)/rgm(reaching, grasping and manipulating) -f(target force) value");
+      ROS_ERROR("Wrong contact dynamics arguments, the command line arguments should be: fileName -m(mode) rg(reaching and grasping)/rgm(reaching, grasping and manipulating) -f(target force) value -an(adapt normal modulation) y(yes)/n(no)");
       return 0;
     }  
 
@@ -37,19 +39,32 @@ int main(int argc, char **argv)
     }
     else
     {
-      ROS_ERROR("Wrong target force arguments, the command line arguments should be: fileName -m(mode) rg(reaching and grasping)/rgm(reaching, grasping and manipulating) -f(target force) value");
+      ROS_ERROR("Wrong target force arguments, the command line arguments should be: fileName -m(mode) rg(reaching and grasping)/rgm(reaching, grasping and manipulating) -f(target force) value -an(adapt normal modulation) y(yes)/n(no)");
+      return 0;
+    }
+
+    if(std::string(argv[6]) == "-an" && std::string(argv[7]) == "y")
+    {
+      adaptNormalModulation = true;
+    }
+    else if(std::string(argv[6]) == "-an" && std::string(argv[7]) == "n")
+    {
+      adaptNormalModulation = false;
+    }
+    else
+    {
+      ROS_ERROR("Wrong adapt normal modulation argument, the command line arguments should be: fileName -m(mode) rg(reaching and grasping)/rgm(reaching, grasping and manipulating) -f(target force) value -an(adapt normal modulation) y(yes)/n(no)");
       return 0;
     } 
-
   }
   else
   {
-    ROS_ERROR("You are missing arguments: the command line arguments should be: fileName -m(mode) rg(reaching and grasping)/rgm(reaching, grasping and manipulating) -f(target force) value");
+    ROS_ERROR("You are missing arguments: the command line arguments should be: fileName -m(mode) rg(reaching and grasping)/rgm(reaching, grasping and manipulating) -f(target force) value -an(adapt normal modulation) y(yes)/n(no)");
     return 0;
   }
 
 
-  ObjectGrasping objectGrasping(n,frequency,filename,mode,targetForce);
+  ObjectGrasping objectGrasping(n,frequency,filename,mode,targetForce,adaptNormalModulation);
 
   if (!objectGrasping.init()) 
   {

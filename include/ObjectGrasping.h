@@ -29,6 +29,7 @@
 #define AVERAGE_COUNT 100
 #define NB_ROBOTS 2
 #define TOTAL_NB_MARKERS 6
+#define WINDOW_SIZE 10
 
 class ObjectGrasping 
 {
@@ -40,7 +41,7 @@ class ObjectGrasping
     enum Mode {REACHING_GRASPING = 0, REACHING_GRASPING_MANIPULATING = 1};
 
     // Robot ID, left or right
-		enum ROBOT {LEFT = 0, RIGHT = 1};
+	enum ROBOT {LEFT = 0, RIGHT = 1};
 
     // Optitrack makers ID
   	enum MarkersID {ROBOT_BASIS_LEFT = 0, ROBOT_BASIS_RIGHT = 1, P1 = 2, P2 = 3, P3 = 4, P4 = 5};
@@ -102,16 +103,19 @@ class ObjectGrasping
     Eigen::Vector4f _qd[NB_ROBOTS];        // Desired quaternion (4x1)
     Eigen::Vector4f _qdPrev[NB_ROBOTS];    // Desired previous quaternion (4x1)
     Eigen::Vector3f _omegad[NB_ROBOTS];    // Desired angular velocity [rad/s] (3x1)
+    Eigen::Vector3f _fx[NB_ROBOTS];        // Nominal DS [m/s] (3x1)
     Eigen::Vector3f _fxc[NB_ROBOTS];       // Desired conservative part of the nominal DS [m/s] (3x1)
     Eigen::Vector3f _fxr[NB_ROBOTS];       // Desired non-conservative part of the nominal DS [m/s] (3x1)
-    Eigen::Vector3f _fx[NB_ROBOTS];        // Nominal DS [m/s] (3x1)
+    Eigen::Vector3f _fxt[NB_ROBOTS];       // Modulation velocity term along tangential direction [m/s] (3x1)
+    Eigen::Vector3f _fxn[NB_ROBOTS];       // Modulation velocity term along normal direction [m/s] (3x1)
     Eigen::Vector3f _fxp[NB_ROBOTS];       // Corrected nominal DS to ensure passivity [m/s] (3x1)
+    Eigen::Vector3f _fxtp[NB_ROBOTS];      // Corrected modulation term along tangential direction to ensure passivity [m/s] (3x1)
+    Eigen::Vector3f _fxnp[NB_ROBOTS];      // Corrected modulation term along normal direction to ensure passivity [m/s] (3x1)
     Eigen::Vector3f _vd[NB_ROBOTS];        // Desired modulated DS [m/s] (3x1)
     float _targetForce;                    // Target force in contact [N]
-    float _Fd[NB_ROBOTS];                  // Desired force profile [N]
-    float _Fdp[NB_ROBOTS];                 // Corrected desired force profile to ensure passivity [N]
-    float _lambdaf[NB_ROBOTS];             // Scalar variable modulating the nominal DS
-
+    float _Fd[NB_ROBOTS];                                  // Desired force profile [N]
+    float _Fdp[NB_ROBOTS];                                 // Corrected desired force profile to ensure passivity [N]
+    float _sigmac;
 
     // Task variables
     Eigen::Vector3f _taskAttractor;   // Attractor position for the object [m] (3x1)
@@ -144,7 +148,8 @@ class ObjectGrasping
     bool _objectGrasped;                                // Check if the object is grasped
     bool _objectReachable;                              // Check if object is reachable by both robots
     bool _goHome;                                       // check for goHome state (object not reachable+ not grasped)
-
+    bool _useForceSensor;                               // check for goHome state (object not reachable+ not grasped)
+    bool _adaptNormalModulation;
     // Optitrack variables
     Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition;       // Markers position in optitrack frame
     Eigen::Matrix<float,3,TOTAL_NB_MARKERS> _markersPosition0;      // Initial markers position in opittrack frame
@@ -159,18 +164,18 @@ class ObjectGrasping
     // Tank parameters
     float _s[NB_ROBOTS];         // Current tank level
     float _smax;                 // Max tank level
-    float _alpha[NB_ROBOTS];     // Scalar variable controlling the dissipated energy flow
-    float _betac[NB_ROBOTS];     // Scalar variable controlling the energy flow due to the conservative part of the nominal DS
-    float _betacp[NB_ROBOTS];    // Scalar variable correcting the conservative part of the nominal DS to ensure passivity
-    float _betar[NB_ROBOTS];     // Scalar variable controlling the energy flow due to the non-conservative part of the nominal DS
-    float _betarp[NB_ROBOTS];    // Scalar variable correcting the non-conservative part of the nominal DS to ensure passivity
-    float _gamma[NB_ROBOTS];     // Scalar variable controlling the energy flow due to the contact force
-    float _gammap[NB_ROBOTS];    // Scalar variable correcting the force profile to ensure passivity
-    float _pc[NB_ROBOTS];        // Power due to the conservative part of the nominal DS
-    float _pr[NB_ROBOTS];        // Power due to the non-conservative part of the nominal DS
-    float _pf[NB_ROBOTS];        // Power due to the contact force
-    float _pd[NB_ROBOTS];        // Dissipated power
-    float _dW[NB_ROBOTS];        // Robot's power flow
+    float _alpha[NB_ROBOTS];           // Scalar variable controlling the dissipated energy flow
+    float _betar[NB_ROBOTS];           // Scalar variable controlling the energy flow due to the non-conservative part of the nominal DS
+    float _betarp[NB_ROBOTS];      // Scalar variable correcting the non-conservative part of the nominal DS to ensure passivity
+    float _betat[NB_ROBOTS];         // Scalar variable controlling the energy flow due to the modulation term along the tangential direction to the surface       
+    float _betatp[NB_ROBOTS];      // Scalar variable correcting the modulation term along the tangential direction to the surface to ensure passivity
+    float _betan[NB_ROBOTS];     // Scalar variable controlling the energy flow due to the modulation term along the normal direction to the surface
+    float _betanp[NB_ROBOTS];    // Scalar variable correcting the modulation term along the normal direction to the surface to ensure passivity
+    float _pr[NB_ROBOTS];              // Power due to the non-conservative part of the nominal DS
+    float _pt[NB_ROBOTS];              // Power due to the modulation term along the tangential direction to the surface
+    float _pn[NB_ROBOTS];              // Power due to the modulation term along the normal direction to the surface
+    float _pd[NB_ROBOTS];              // Dissipated power
+    float _dW[NB_ROBOTS];              // Robot's power flow
 
     // User variables
     float _velocityLimit;           // Velocity limit [m/s]
@@ -198,13 +203,18 @@ class ObjectGrasping
     dynamic_reconfigure::Server<force_based_ds_modulation::objectGrasping_paramsConfig> _dynRecServer;
     dynamic_reconfigure::Server<force_based_ds_modulation::objectGrasping_paramsConfig>::CallbackType _dynRecCallback;
 
-    float _scale[NB_ROBOTS];
+    float _deltaF[NB_ROBOTS];
+    float _epsilonF;
+    float _epsilonF0;
+    float _gammaF;
+
+    std::deque<float> _normalForceWindow[NB_ROBOTS];
 
 
   public:
 
     // Class constructor
-		ObjectGrasping(ros::NodeHandle &n, double frequency, std::string filename, Mode mode, float targetForce);
+		ObjectGrasping(ros::NodeHandle &n, double frequency, std::string filename, Mode mode, float targetForce, bool adaptNormalModulation);
 
     // initialize node
 		bool init();
@@ -225,7 +235,16 @@ class ObjectGrasping
 
     // Check if object is reachable
     void isObjectReachable();
-		
+
+    // Update contact state with the surface
+    void updateContactState();
+                
+    // Compute desired contact force profile
+    void computeDesiredContactForceProfile();
+
+    // Compute modulation terms along tangential and normal direction to the surface
+    void computeModulationTerms();
+    
     // Compute nominal DS
     void computeNominalDS();
 
