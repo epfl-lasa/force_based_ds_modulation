@@ -63,6 +63,8 @@ int main(int argc, char **argv)
     return 0;
   }
 
+  filename += "_"+std::string(argv[3])+"_"+std::string(argv[7]);
+
 
   ObjectGrasping objectGrasping(n,frequency,filename,mode,targetForce,adaptNormalModulation);
 

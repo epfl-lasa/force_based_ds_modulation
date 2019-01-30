@@ -36,10 +36,8 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
     _fxc[k].setConstant(0.0f);
     _fxr[k].setConstant(0.0f);
     _fx[k].setConstant(0.0f);
-    _fxt[k].setConstant(0.0f);
     _fxn[k].setConstant(0.0f);
     _fxp[k].setConstant(0.0f);
-    _fxtp[k].setConstant(0.0f);
     _fxnp[k].setConstant(0.0f);
     _vd[k].setConstant(0.0f);
     _omegad[k].setConstant(0.0f);
@@ -59,8 +57,9 @@ ObjectGrasping::ObjectGrasping(ros::NodeHandle &n, double frequency, std::string
     _wrenchBiasOK[k] = false;
     _d1[k] = 1.0f;
     _deltaF[k] = 0.0f;
+    _normalForceAverage[k] = 0.0f;
   }
-  _sigmac = 0.0f;
+  _c = 0.0f;
 
   _objectReachable = false;
   _objectGrasped = false;
@@ -359,9 +358,9 @@ void ObjectGrasping::computeObjectPose()
     _xCFilter.AddData(_xoC);
     _xCFilter.GetOutput(0,temp);
     _xoC = temp;
-    Eigen::Vector3f xDir = _p2-_p1;
+    Eigen::Vector3f xDir = _p4-_p1;
     xDir.normalize();
-    Eigen::Vector3f yDir = _p1-_p4;
+    Eigen::Vector3f yDir = _p2-_p1;
     yDir.normalize();
     Eigen::Vector3f zDir = xDir.cross(yDir);
     zDir.normalize();
@@ -455,61 +454,100 @@ void ObjectGrasping::computeCommand()
 
 void ObjectGrasping::updateContactState()
 {
-  if(_useForceSensor)
+  // if(_useForceSensor)
+  // {
+  //   float average[NB_ROBOTS];
+  //   for(int k = 0; k < NB_ROBOTS; k++)
+  //   {
+  //     if(_normalForceWindow[k].size()<WINDOW_SIZE)
+  //     {
+  //       _normalForceWindow[k].push_back(_normalForce[k]);
+  //     }
+  //     else
+  //     {
+  //       _normalForceWindow[k].pop_front();
+  //       _normalForceWindow[k].push_back(_normalForce[k]);
+  //       average[k] = 0.0f;
+  //       for(int m = 0; m < WINDOW_SIZE; m++)
+  //       {
+  //         average[k]+=_normalForceWindow[k][m];
+  //       }
+  //       average[k] /= WINDOW_SIZE;
+  //     }
+  //   }
+  //   if(_normalForceWindow[RIGHT].size()<WINDOW_SIZE || _normalForceWindow[LEFT].size()<WINDOW_SIZE)
+  //   {
+  //     _c = 0.0f;
+  //     _objectGrasped = false;
+  //   }
+  //   else
+  //   {
+  //     if(average[LEFT] > 3.0f && average[RIGHT] > 3.0f &&  _eoD < 0.03f && _eoC < 0.1f)
+  //     {
+  //       _c = 1.0f;
+  //       _objectGrasped = true;
+  //     }
+  //     else
+  //     {
+  //       _c = 0.0f;
+  //       _objectGrasped = false;
+  //     }
+  //   }
+  // }
+  // else
+  // {
+  //   if(_eoD < 0.03f && _eoC < 0.1f)
+  //   {
+  //     _c = 1.0f;
+  //     _objectGrasped = true;
+
+  //   }
+  //   else
+  //   {
+  //     _c = 0.0f;
+  //     _objectGrasped = false;
+  //   }
+  // }
+
+  for(int k = 0; k < NB_ROBOTS; k++)
   {
-    float average[NB_ROBOTS];
-    for(int k = 0; k < NB_ROBOTS; k++)
+    if(_normalForceWindow[k].size()<WINDOW_SIZE)
     {
-      if(_normalForceWindow[k].size()<WINDOW_SIZE)
-      {
-        _normalForceWindow[k].push_back(_normalForce[k]);
-      }
-      else
-      {
-        _normalForceWindow[k].pop_front();
-        _normalForceWindow[k].push_back(_normalForce[k]);
-        average[k] = 0.0f;
-        for(int m = 0; m < WINDOW_SIZE; m++)
-        {
-          average[k]+=_normalForceWindow[k][m];
-        }
-        average[k] /= WINDOW_SIZE;
-      }
-    }
-    if(_normalForceWindow[RIGHT].size()<WINDOW_SIZE || _normalForceWindow[LEFT].size()<WINDOW_SIZE)
-    {
-      _sigmac = 0.0f;
-      _objectGrasped = false;
+      _normalForceWindow[k].push_back(_normalForce[k]);
+      _normalForceAverage[k] = 0.0f;
     }
     else
     {
-      if(average[LEFT] > 3.0f && average[RIGHT] > 3.0f &&  _eoD < 0.03f && _eoC < 0.1f)
+      _normalForceWindow[k].pop_front();
+      _normalForceWindow[k].push_back(_normalForce[k]);
+      _normalForceAverage[k] = 0.0f;
+      for(int m = 0; m < WINDOW_SIZE; m++)
       {
-        _sigmac = 1.0f;
-        _objectGrasped = true;
+        _normalForceAverage[k]+=_normalForceWindow[k][m];
       }
-      else
-      {
-        _sigmac = 0.0f;
-        _objectGrasped = false;
-      }
+      _normalForceAverage[k] /= WINDOW_SIZE;
     }
+  }
+
+  if(_normalForceAverage[LEFT] > 3.0f && _normalForceAverage[RIGHT] > 3.0f &&  _eoD < 0.05f && _eoC < 0.1f)
+  {
+    _contactState = CONTACT;
+    _c = 1.0f;
+  }
+  else if(!(_normalForceAverage[LEFT] > 3.0f && _normalForceAverage[RIGHT] > 3.0f) && _eoD < 0.05f && _eoC < 0.1f)
+  {
+    _contactState = CLOSE_TO_CONTACT;
+    _c = 0.0f;
   }
   else
   {
-    if(_eoD < 0.03f && _eoC < 0.1f)
-    {
-      _sigmac = 1.0f;
-      _objectGrasped = true;
-
-    }
-    else
-    {
-      _sigmac = 0.0f;
-      _objectGrasped = false;
-    }
+    _contactState = NO_CONTACT;
+    _c = 0.0f;
   }
-  std::cerr << "[ObjectGrasping]: sigmac: " << _sigmac << std::endl;
+
+  std::cerr << "[ObjectGrasping]: contact state: " << (int) _contactState << " c: " << _c << std::endl;
+
+
 }
 
 
@@ -518,9 +556,10 @@ void ObjectGrasping::computeNominalDS()
   _goHome = false;
   // Compute desired center position and distance vector
   // based on reachable and grasping states
+
   if(_objectReachable)
   {
-    if(_objectGrasped) // Object reachable and grasped
+    if(_contactState==CONTACT) // Object reachable and grasped
     {
       _xdC = _xC;
     }
@@ -541,7 +580,7 @@ void ObjectGrasping::computeNominalDS()
   }
   else
   {
-    if(_objectGrasped)  // Object not reachable but grasped (due to workspace model inaccuracies)
+    if(_contactState==CONTACT)  // Object not reachable but grasped (due to workspace model inaccuracies)
     {
       _xdC = _xC;
       _xdD = _xoD; 
@@ -574,7 +613,7 @@ void ObjectGrasping::computeNominalDS()
   }
   else if(_mode == REACHING_GRASPING_MANIPULATING)
   {
-    if(_objectGrasped)
+    if(_contactState==CONTACT)
     {
       _vdC = (_taskAttractor+_offset-_xC);
     }
@@ -596,7 +635,7 @@ void ObjectGrasping::computeNominalDS()
   { 
 
     // Maybe remove that
-    if(_fxc[k].dot(_n[k])<0.0f && _objectGrasped)
+    if(_fxc[k].dot(_n[k])<0.0f && _contactState==CONTACT)
     {
       _fxc[k].setConstant(0.0f);
     } 
@@ -606,15 +645,27 @@ void ObjectGrasping::computeNominalDS()
 
 void ObjectGrasping::computeDesiredContactForceProfile()
 {
-  for(int k = 0; k < NB_ROBOTS; k++)
+  if(_goHome)
   {
-    if(_goHome)
+    _Fd[LEFT] = 0.0f;
+    _Fd[RIGHT] = 0.0f;
+  }
+  else
+  {
+    if(_contactState==CONTACT)
     {
-      _Fd[k] = 0.0f;
+      _Fd[LEFT] = _targetForce;
+      _Fd[RIGHT] = _targetForce;
+    }
+    else if(_contactState==CLOSE_TO_CONTACT)
+    {
+      _Fd[LEFT] = 3.0f;
+      _Fd[RIGHT] = 3.0f;
     }
     else
     {
-      _Fd[k] = _targetForce;
+      _Fd[LEFT] = 0.0f;
+      _Fd[RIGHT] = 0.0f;
     }
   }
 }
@@ -626,14 +677,14 @@ void ObjectGrasping::computeModulationTerms()
   {
     for(int k = 0; k < NB_ROBOTS; k++)
     { 
-      _fxn[k] = _sigmac*(_Fd[k]/_d1[k])*_n[k];
+      _fxn[k] = (_Fd[k]/_d1[k])*_n[k];
     }
   }
   else
   {
     for(int k = 0; k <NB_ROBOTS; k++)
     {
-      float ddeltaF = _epsilonF*(_sigmac*(_Fd[k]-_normalForce[k]))-_epsilonF0*(1-_sigmac)*_deltaF[k];
+      float ddeltaF = _epsilonF*(_c*(_Fd[k]-_normalForce[k]))-_epsilonF0*(1-_c)*_deltaF[k];
       _deltaF[k] += _dt*ddeltaF;
       if(_deltaF[k] > _gammaF*_Fd[k])
       {
@@ -644,13 +695,8 @@ void ObjectGrasping::computeModulationTerms()
         _deltaF[k] = -_gammaF*_Fd[k];
       }
 
-      _fxn[k] = _sigmac*((_Fd[k]+_deltaF[k])/_d1[k])*_n[k]; 
+      _fxn[k] = ((_Fd[k]+_c*_deltaF[k])/_d1[k])*_n[k]; 
     }
-  }
-
-  for(int k = 0; k <NB_ROBOTS; k++)
-  {
-    _fxt[k].setConstant(0.0f);
   }
 
   std::cerr << "[ObjectGrasping]: " << "deltaF LEFT: " << _deltaF[LEFT] << " deltaF RIGHT: " << _deltaF[RIGHT] << std::endl;
@@ -672,8 +718,6 @@ void ObjectGrasping::updateTankScalars()
     //           -Utils::smoothFall(_pr[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
 
     // _betarp[k] = 1-Utils::smoothRise(_pr[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds);
-
-    _pt[k] = _d1[k]*_v[k].dot(_fxt[k]);
 
     // _betat[k] = 1-Utils::smoothRise(_pt[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds)
     //           -Utils::smoothFall(_pt[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
@@ -701,19 +745,6 @@ void ObjectGrasping::updateTankScalars()
       _betar[k] = 1.0f;
     }
     
-    if(_s[k] < -FLT_EPSILON && _pt[k] > FLT_EPSILON)
-    {
-      _betat[k] = 0.0f;
-    }
-    else if(_s[k] > _smax && _pt[k] < -FLT_EPSILON)
-    {
-      _betat[k] = 0.0f;
-    }
-    else
-    {
-      _betat[k] = 1.0f;
-    }
-    
     if(_s[k] < FLT_EPSILON && _pn[k] > FLT_EPSILON)
     {
       _betan[k] = 0.0f;
@@ -734,15 +765,6 @@ void ObjectGrasping::updateTankScalars()
     else
     {
       _betarp[k] = _betar[k];
-    }
-
-    if(_pt[k]<-FLT_EPSILON)
-    {
-      _betatp[k] = 1.0f;
-    }
-    else
-    {
-      _betatp[k] = _betat[k];
     }
 
     if(_pn[k]<-FLT_EPSILON)
@@ -767,13 +789,12 @@ void ObjectGrasping::computeModulatedDS()
   {
     // Compute corrected nominal DS and modulation terms
     _fxp[k] = _fxc[k]+_betarp[k]*_fxr[k];
-    _fxtp[k] = _betatp[k]*_fxt[k];
     _fxnp[k] = _betanp[k]*_fxn[k];
 
     // Update tank dynamics !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // _pd[k] = _v.transpose()*(Eigen::Matrix3f::Identity()-_gain*_n*_n.transpose())*_D*_v;
     _pd[k] = _v[k].transpose()*_D[k]*_v[k];
-    float ds = _dt*(_alpha[k]*_pd[k]-_betar[k]*_pr[k]-_betat[k]*_pt[k]-_betan[k]*_pn[k]);
+    float ds = _dt*(_alpha[k]*_pd[k]-_betar[k]*_pr[k]-_betan[k]*_pn[k]);
 
     if(_s[k]+ds>_smax)
     {
@@ -789,10 +810,10 @@ void ObjectGrasping::computeModulatedDS()
     }
 
     // Update robot's power flow
-    _dW[k] = (_betarp[k]-_betar[k])*_pr[k]+(_betatp[k]-_betat[k])*_pt[k]+(_betanp[k]-_betan[k])*_pn[k]-(1-_alpha[k])*_pd[k];
+    _dW[k] = (_betarp[k]-_betar[k])*_pr[k]+(_betanp[k]-_betan[k])*_pn[k]-(1-_alpha[k])*_pd[k];
 
     // Compute modulated DS
-    _vd[k] = _fxp[k]+_fxtp[k]+_fxnp[k]+_vdC;
+    _vd[k] = _fxp[k]+_fxnp[k]+_vdC;
 
     // Bound modulated DS for safety 
     if(_vd[k].norm()>_velocityLimit)
@@ -804,11 +825,11 @@ void ObjectGrasping::computeModulatedDS()
 
     if(!_adaptNormalModulation)
     {
-      std::cerr << "[ObjectGrasping]: Robot " << k << " F: " << _normalForce[k] << " Fd corrected:  " << _betanp[k]*_sigmac*_Fd[k] << std::endl;
+      std::cerr << "[ObjectGrasping]: Robot " << k << " F: " << _normalForce[k] << " Fd corrected:  " << _betanp[k]*_Fd[k] << std::endl;
     }
     else
     {
-      std::cerr << "[ObjectGrasping]: Robot " << k << " F: " << _normalForce[k] << " Fd corrected:  " << _betanp[k]*_sigmac*(_Fd[k]+_deltaF[k]) << std::endl;
+      std::cerr << "[ObjectGrasping]: Robot " << k << " F: " << _normalForce[k] << " Fd corrected:  " << _betanp[k]*(_Fd[k]+_c*_deltaF[k]) << std::endl;
     }
 
     std::cerr << "[ObjectGrasping]: Robot " << k << " vd: " << _vd[k].norm() << " v: " << _v[k].norm() <<std::endl;
@@ -888,7 +909,6 @@ void ObjectGrasping::logData()
               << _x[LEFT].transpose() << " "
               << _v[LEFT].transpose() << " "
               << _fxp[LEFT].transpose() << " "
-              << _fxtp[LEFT].transpose() << " "
               << _fxnp[LEFT].transpose() << " "
               << _vd[LEFT].transpose() << " "
               << _normalForce[LEFT] << " "
@@ -897,7 +917,6 @@ void ObjectGrasping::logData()
               << _x[RIGHT].transpose() << " "
               << _v[RIGHT].transpose() << " "
               << _fxp[RIGHT].transpose() << " "
-              << _fxtp[RIGHT].transpose() << " "
               << _fxnp[RIGHT].transpose() << " "
               << _vd[RIGHT].transpose() << " "
               << _normalForce[RIGHT] << " "
@@ -910,30 +929,24 @@ void ObjectGrasping::logData()
               << _xdC.transpose() << " "
               << _xdD.transpose() << " "
               << (int) _objectGrasped << " "
-              << _sigmac << " "
+              << _c << " "
               << _s[LEFT] << " " 
               << _pd[LEFT] << " " 
               << _pr[LEFT] << " " 
-              << _pt[LEFT] << " " 
               << _pn[LEFT] << " " 
               << _alpha[LEFT] << " "
               << _betar[LEFT] << " "
               << _betarp[LEFT] << " "
-              << _betat[LEFT] << " "
-              << _betatp[LEFT] << " "
               << _betan[LEFT] << " "
               << _betanp[LEFT] << " "
               << _dW[LEFT] << " "
               << _s[RIGHT] << " "
               << _pd[RIGHT] << " " 
               << _pr[RIGHT] << " " 
-              << _pt[RIGHT] << " " 
               << _pn[RIGHT] << " " 
               << _alpha[RIGHT] << " "
               << _betar[RIGHT] << " "
               << _betarp[RIGHT] << " "
-              << _betat[RIGHT] << " "
-              << _betatp[RIGHT] << " "
               << _betan[RIGHT] << " "
               << _betanp[RIGHT] << " "
               << _dW[RIGHT] << std::endl;

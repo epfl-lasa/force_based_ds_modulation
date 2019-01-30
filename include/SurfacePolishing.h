@@ -99,17 +99,15 @@ class SurfacePolishing
 		Eigen::Vector3f _fx;				// Nominal DS [m/s] (3x1)
 		Eigen::Vector3f _fxc;				// Desired conservative part of the nominal DS [m/s] (3x1)
 		Eigen::Vector3f _fxr;				// Desired non-conservative part of the nominal DS [m/s] (3x1)
-		Eigen::Vector3f _fxt;				// Modulation velocity term along tangential direction [m/s] (3x1)
 		Eigen::Vector3f _fxn;				// Modulation velocity term along normal direction [m/s] (3x1)
 		Eigen::Vector3f _fxp;				// Corrected nominal DS to ensure passivity [m/s] (3x1)
-		Eigen::Vector3f _fxtp;			// Corrected modulation term along tangential direction to ensure passivity [m/s] (3x1)
 		Eigen::Vector3f _fxnp;			// Corrected modulation term along normal direction to ensure passivity [m/s] (3x1)
 		Eigen::Vector3f _vd;				// Desired modulated DS [m/s] (3x1)
 		float _targetForce;					// Target force in contact [N]
 		float _targetVelocity;			// Velocity norm of the nominal DS [m/s]
 		float _Fd;									// Desired force profile [N]
 		float _Fdp;									// Corrected desired force profile to ensure passivity [N]
-		float _sigmac;
+		float _c;
 
 		// Task variables
 		SurfaceType _surfaceType;							// Surface type
@@ -148,12 +146,9 @@ class SurfacePolishing
 		float _alpha;			// Scalar variable controlling the dissipated energy flow
 		float _betar;			// Scalar variable controlling the energy flow due to the non-conservative part of the nominal DS
 		float _betarp;		// Scalar variable correcting the non-conservative part of the nominal DS to ensure passivity
-		float _betat;		  // Scalar variable controlling the energy flow due to the modulation term along the tangential direction to the surface		
-		float _betatp;		// Scalar variable correcting the modulation term along the tangential direction to the surface to ensure passivity
 		float _betan;     // Scalar variable controlling the energy flow due to the modulation term along the normal direction to the surface
 		float _betanp;    // Scalar variable correcting the modulation term along the normal direction to the surface to ensure passivity
 		float _pr;				// Power due to the non-conservative part of the nominal DS
-		float _pt;				// Power due to the modulation term along the tangential direction to the surface
 		float _pn;				// Power due to the modulation term along the normal direction to the surface
 		float _pd;				// Dissipated power
 		float _dW;				// Robot's power flow
@@ -198,15 +193,15 @@ class SurfacePolishing
   	float _gammaf;
   	float _gammaF;
   	float _normalDistanceTolerance;
+		std::deque<float> _normalForceWindow;
+		float _normalForceAverage;
+		float _normalForceTolerance;
 		// Dynamic reconfigure (server+callback)
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig> _dynRecServer;
 		dynamic_reconfigure::Server<force_based_ds_modulation::surfacePolishing_paramsConfig>::CallbackType _dynRecCallback;
 
-		std::shared_ptr<GaussianProcessRegression<float> > _gpr;
-
 		float _gain = 0.0f;
 
-		std::deque<float> _normalForceWindow;
 
 
 	public:
@@ -257,8 +252,6 @@ class SurfacePolishing
 		// Compute desired orientation
 		void computeDesiredOrientation();
     
-		void normalEstimation();
-
   	// Log data to text file
     void logData();
 

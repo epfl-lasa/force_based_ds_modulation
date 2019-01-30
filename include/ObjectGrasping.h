@@ -40,6 +40,8 @@ class ObjectGrasping
     //                                 to a predefined position
     enum Mode {REACHING_GRASPING = 0, REACHING_GRASPING_MANIPULATING = 1};
 
+    enum ContactState {CONTACT = 0, CLOSE_TO_CONTACT = 1, NO_CONTACT = 2};
+
     // Robot ID, left or right
 	enum ROBOT {LEFT = 0, RIGHT = 1};
 
@@ -106,16 +108,14 @@ class ObjectGrasping
     Eigen::Vector3f _fx[NB_ROBOTS];        // Nominal DS [m/s] (3x1)
     Eigen::Vector3f _fxc[NB_ROBOTS];       // Desired conservative part of the nominal DS [m/s] (3x1)
     Eigen::Vector3f _fxr[NB_ROBOTS];       // Desired non-conservative part of the nominal DS [m/s] (3x1)
-    Eigen::Vector3f _fxt[NB_ROBOTS];       // Modulation velocity term along tangential direction [m/s] (3x1)
     Eigen::Vector3f _fxn[NB_ROBOTS];       // Modulation velocity term along normal direction [m/s] (3x1)
     Eigen::Vector3f _fxp[NB_ROBOTS];       // Corrected nominal DS to ensure passivity [m/s] (3x1)
-    Eigen::Vector3f _fxtp[NB_ROBOTS];      // Corrected modulation term along tangential direction to ensure passivity [m/s] (3x1)
     Eigen::Vector3f _fxnp[NB_ROBOTS];      // Corrected modulation term along normal direction to ensure passivity [m/s] (3x1)
     Eigen::Vector3f _vd[NB_ROBOTS];        // Desired modulated DS [m/s] (3x1)
     float _targetForce;                    // Target force in contact [N]
     float _Fd[NB_ROBOTS];                                  // Desired force profile [N]
     float _Fdp[NB_ROBOTS];                                 // Corrected desired force profile to ensure passivity [N]
-    float _sigmac;
+    float _c;
 
     // Task variables
     Eigen::Vector3f _taskAttractor;   // Attractor position for the object [m] (3x1)
@@ -167,12 +167,9 @@ class ObjectGrasping
     float _alpha[NB_ROBOTS];           // Scalar variable controlling the dissipated energy flow
     float _betar[NB_ROBOTS];           // Scalar variable controlling the energy flow due to the non-conservative part of the nominal DS
     float _betarp[NB_ROBOTS];      // Scalar variable correcting the non-conservative part of the nominal DS to ensure passivity
-    float _betat[NB_ROBOTS];         // Scalar variable controlling the energy flow due to the modulation term along the tangential direction to the surface       
-    float _betatp[NB_ROBOTS];      // Scalar variable correcting the modulation term along the tangential direction to the surface to ensure passivity
     float _betan[NB_ROBOTS];     // Scalar variable controlling the energy flow due to the modulation term along the normal direction to the surface
     float _betanp[NB_ROBOTS];    // Scalar variable correcting the modulation term along the normal direction to the surface to ensure passivity
     float _pr[NB_ROBOTS];              // Power due to the non-conservative part of the nominal DS
-    float _pt[NB_ROBOTS];              // Power due to the modulation term along the tangential direction to the surface
     float _pn[NB_ROBOTS];              // Power due to the modulation term along the normal direction to the surface
     float _pd[NB_ROBOTS];              // Dissipated power
     float _dW[NB_ROBOTS];              // Robot's power flow
@@ -207,8 +204,11 @@ class ObjectGrasping
     float _epsilonF;
     float _epsilonF0;
     float _gammaF;
+    float _normalForceAverage[NB_ROBOTS];
+    ContactState _contactState;
 
     std::deque<float> _normalForceWindow[NB_ROBOTS];
+
 
 
   public:

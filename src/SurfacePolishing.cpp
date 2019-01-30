@@ -14,12 +14,10 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _targetVelocity(targetVelocity),
   _targetForce(targetForce),
   _adaptTangentialModulation(adaptTangentialModulation),
-  _adaptNormalModulation(adaptNormalModulation),
-  _gpr(new GaussianProcessRegression<float>(3,3))
+  _adaptNormalModulation(adaptNormalModulation)
 {
   me = this;
 
-  _gpr->SetHyperParams(0.2f, 1.0f, 0.2f);
   _gravity << 0.0f, 0.0f, -9.80665f;
   _toolComPositionFromSensor << 0.0f,0.0f,0.02f;
   _toolOffsetFromEE = 0.15f;
@@ -38,10 +36,8 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _fxc.setConstant(0.0f);
   _fxr.setConstant(0.0f);
   _fx.setConstant(0.0f);
-  _fxt.setConstant(0.0f);
   _fxn.setConstant(0.0f);
   _fxp.setConstant(0.0f);
-  _fxtp.setConstant(0.0f);
   _fxnp.setConstant(0.0f);
   _vd.setConstant(0.0f);
   _Fd = 0.0f;
@@ -179,16 +175,15 @@ SurfacePolishing::SurfacePolishing(ros::NodeHandle &n, double frequency, std::st
   _P(1,1) = 0.01f;
   _P(2,2) = 0.01f;
   _Fds = 0.0f;
-  _sigmac = 0.0f;
+  _c = 0.0f;
   _deltaf = 0.0f;
   _deltaF = 0.0f;
-  _epsilonf = 0.5f;
-  _epsilonf0 = 5.0f;
-  _epsilonF = 0.5f;
+  _epsilonF = 1.0f;
   _epsilonF0 = 5.0f;
-  _gammaf = 1.0f;
-  _gammaF = 0.5f;
-  _normalDistanceTolerance = 0.005f;
+  _gammaF = 1.0f;
+  _normalDistanceTolerance = 0.05f;
+  _normalForceTolerance = 3.0f;
+  _normalForceAverage = 0.0f;
 }
 
 
@@ -284,29 +279,6 @@ bool SurfacePolishing::init()
     return false;
   }
 
-  // if (!_nh.getParam("epsilonf", _epsilonf))  
-  // {
-  //   ROS_ERROR("[SurfacePolishing]: Could not retrieve epsilonf");
-  //   return false;
-  // }
-
-  // if (!_nh.getParam("epsilonF", _epsilonF))  
-  // {
-  //   ROS_ERROR("[SurfacePolishing]: Could not retrieve epsilonF");
-  //   return false;
-  // }
-
-  // if (!_nh.getParam("epsilonF", _gammaF))  
-  // {
-  //   ROS_ERROR("[SurfacePolishing]: Could not retrieve gammaf");
-  //   return false;
-  // }
-
-  // if (!_nh.getParam("gammaf", _gammaF))  
-  // {
-  //   ROS_ERROR("[SurfacePolishing]: Could not retrieve gammaF");
-  //   return false;
-  // }
   if (_nh.ok()) 
   { 
     // Wait for poses being published
@@ -531,59 +503,75 @@ Eigen::Vector3f SurfacePolishing::getCircularMotionVelocity(Eigen::Vector3f posi
 void SurfacePolishing::updateContactState()
 {
 
-  float average = 0.0f;
-  if(_adaptNormalModulation)
-  {
+  // float average = 0.0f;
+  // if(_adaptNormalModulation)
+  // {
     
-    if(_normalForceWindow.size()<WINDOW_SIZE)
-    {
-      _normalForceWindow.push_back(_normalForce);
-      _sigmac = 0.0f;
-    }
-    else
-    {
-      _normalForceWindow.pop_front();
-      _normalForceWindow.push_back(_normalForce);
-      float average = 0.0f;
-      for(int k = 0; k < WINDOW_SIZE; k++)
-      {
-        average+=_normalForceWindow[k];
-      }
-      average /= WINDOW_SIZE;
-      if(average>3.0f && _normalDistance < 0.05f)
-      {
-        if(_sigmac < FLT_EPSILON)
-        {
-          _timeInit = ros::Time::now().toSec();;
-        }
-        _sigmac = 1.0f;
-      }
-      // else
-      // {
-      //   _sigmac = 0.0f;
-      // }
-    }
+  //   if(_normalForceWindow.size()<WINDOW_SIZE)
+  //   {
+  //     _normalForceWindow.push_back(_normalForce);
+  //     _c = 0.0f;
+  //   }
+  //   else
+  //   {
+  //     _normalForceWindow.pop_front();
+  //     _normalForceWindow.push_back(_normalForce);
+  //     float average = 0.0f;
+  //     for(int k = 0; k < WINDOW_SIZE; k++)
+  //     {
+  //       average+=_normalForceWindow[k];
+  //     }
+  //     average /= WINDOW_SIZE;
+  //     if(average>3.0f && _normalDistance < 0.05f)
+  //     {
+  //       if(_c < FLT_EPSILON)
+  //       {
+  //         _timeInit = ros::Time::now().toSec();;
+  //       }
+  //       _c = 1.0f;
+  //     }
+  //     // else
+  //     // {
+  //     //   _c = 0.0f;
+  //     // }
+  //   }
+  // }
+  // else
+  // {
+  //   if(_normalDistance<_normalDistanceTolerance)
+  //   {
+  //     if(_c < FLT_EPSILON)
+  //     {
+  //       _timeInit = ros::Time::now().toSec();;
+  //     }
+  //     _c = 1.0f;
+  //   }
+  //   else
+  //   {
+  //     _c = 0.0f;
+  //   }
+  // }
+
+  if(_normalForceWindow.size()<WINDOW_SIZE)
+  {
+    _normalForceWindow.push_back(_normalForce);
+    _normalForceAverage = 0.0f;
   }
   else
   {
-    if(_normalDistance<_normalDistanceTolerance)
+    _normalForceWindow.pop_front();
+    _normalForceWindow.push_back(_normalForce);
+    _normalForceAverage = 0.0f;
+    for(int k = 0; k < WINDOW_SIZE; k++)
     {
-      if(_sigmac < FLT_EPSILON)
-      {
-        _timeInit = ros::Time::now().toSec();;
-      }
-      _sigmac = 1.0f;
+      _normalForceAverage+=_normalForceWindow[k];
     }
-    else
-    {
-      _sigmac = 0.0f;
-    }
+    _normalForceAverage /= WINDOW_SIZE;
   }
 
+  // _normalDistance*=(1-_c);
 
-  _normalDistance*=(1-_sigmac);
-
-  std::cerr << "[SurfacePolishing]: sigmac: " << _sigmac << " average: " << average <<std::endl;
+  // std::cerr << "[SurfacePolishing]: sigmac: " << _c << " average: " << average <<std::endl;
 
 }
 
@@ -625,7 +613,7 @@ void SurfacePolishing::computeNominalDS()
   // Compute rotation angle + axis between reaching velocity vector and circular dynamics
   float angle = std::acos(v0.normalized().dot(vdContact));
   float theta;
-  if(_sigmac>FLT_EPSILON)
+  if(_c>FLT_EPSILON)
   {
     theta = angle;
   }
@@ -659,8 +647,27 @@ void SurfacePolishing::computeNominalDS()
 
 void SurfacePolishing::computeDesiredContactForceProfile()
 {
-  _Fd = _targetForce;
-  _Fd = _Fds;
+
+  if(_normalDistance < _normalDistanceTolerance && _normalForceAverage < _normalForceTolerance)
+  {
+    _Fd = 3.0f;
+    _c = 0.0f;
+  }
+  else if(_normalDistance < _normalDistanceTolerance && _normalForceAverage >= _normalForceTolerance)
+  {
+    // _Fd = _targetForce;
+    _Fd = _Fds;
+    if(_adaptNormalModulation)
+    {
+      _c = 1.0f;
+    }
+  }
+  else
+  {
+    _Fd = 0.0f;
+    _c = 0.0f;
+  }
+
 }
 
 void SurfacePolishing::computeModulationTerms()
@@ -668,12 +675,11 @@ void SurfacePolishing::computeModulationTerms()
 
   if(!_adaptNormalModulation)
   {
-    _fxn = _sigmac*(_Fd/_d1)*_n;
+    _fxn = (_Fd/_d1)*_n;
   }
   else
   {
-
-    float ddeltaF = _epsilonF*(_sigmac*(_Fd-_normalForce))-_epsilonF0*(1-_sigmac)*_deltaF;
+    float ddeltaF = _epsilonF*(_c*(_Fd-_normalForce))-_epsilonF0*(1-_c)*_deltaF;
     _deltaF += _dt*ddeltaF;
     if(_deltaF > _gammaF*_Fd)
     {
@@ -684,44 +690,10 @@ void SurfacePolishing::computeModulationTerms()
       _deltaF = -_gammaF*_Fd;
     }
 
-    _fxn = _sigmac*((_Fd+_deltaF)/_d1)*_n;
+    _fxn = ((_Fd+_c*_deltaF)/_d1)*_n;
   }
 
-  if(!_adaptTangentialModulation)
-  {
-    _fxt.setConstant(0.0f);
-  }
-  else
-  {
-    Eigen::Vector3f t;
-    Eigen::Vector3f temp = (Eigen::Matrix3f::Identity()-_n*_n.transpose())*_fx;
-    if(temp.norm()<FLT_EPSILON)
-    {
-      t.setConstant(0.0f);
-    }
-    else
-    {
-      t = temp.normalized();
-      
-    }
-
-    float ddeltaf = _epsilonf*_sigmac*(_fx.dot(t)-_v.dot(t))-_epsilonf0*(1-_sigmac)*_deltaf;   
-    _deltaf += _dt*ddeltaf;  
-    if(_deltaf>_gammaf*_fx.norm())
-    {
-      _deltaf = _gammaf*_fx.norm();
-    }
-    else
-    {
-      if(_deltaf<-_gammaf*_fx.norm())
-      {
-        _deltaf = -_gammaf*_fx.norm();
-      }
-    }
-    _fxt = _sigmac*_deltaf*t;
-  } 
-
-  std::cerr << "[SurfacePolishing]: " << "deltaF: " << _deltaF << " deltaf: " << _deltaf << std::endl;
+  std::cerr << "[SurfacePolishing]: " << "deltaF: " << _deltaF << std::endl;
 }
 
 
@@ -730,60 +702,100 @@ void SurfacePolishing::updateTankScalars()
   float dp = 0.2f;
   float ds = 0.1f*_smax;
 
-  _alpha = Utils::smoothFall(_s,_smax-ds,_smax);
+  // _alpha = Utils::smoothFall(_s,_smax-ds,_smax);
 
-  _pr = _d1*_v.dot(_fxr);
+  // _pr = _d1*_v.dot(_fxr);
 
-  _betar = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
-            -Utils::smoothFall(_pr,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
+  // _betar = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
+  //           -Utils::smoothFall(_pr,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
-  _betarp = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+  // _betarp = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
 
-  _pt = _d1*_v.dot(_fxt);
+  // _pt = _d1*_v.dot(_fxt);
 
-  _betat = 1-Utils::smoothRise(_pt,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
-            -Utils::smoothFall(_pt,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
+  // _betat = 1-Utils::smoothRise(_pt,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
+  //           -Utils::smoothFall(_pt,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
-  _betatp = 1-Utils::smoothRise(_pt,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+  // _betatp = 1-Utils::smoothRise(_pt,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
 
-  _pn = _d1*_v.dot(_fxn);
+  // _pn = _d1*_v.dot(_fxn);
 
-  _betan = 1-Utils::smoothRise(_pn,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
-            -Utils::smoothFall(_pn,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
+  // _betan = 1-Utils::smoothRise(_pn,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
+  //           -Utils::smoothFall(_pn,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
 
-  _betanp = 1-Utils::smoothRise(_pn,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+  // _betanp = 1-Utils::smoothRise(_pn,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+
+    _alpha = Utils::smoothFall(_s,_smax-ds,_smax);
+
+    _pr = _d1*_v.dot(_fxr);
+    _pn = _d1*_v.dot(_fxn);
+
+    if(_s < -FLT_EPSILON && _pr > FLT_EPSILON)
+    {
+      _betar = 0.0f;
+    }
+    else if(_s > _smax && _pr < -FLT_EPSILON)
+    {
+      _betar = 0.0f;
+    }
+    else
+    {
+      _betar = 1.0f;
+    }
+    
+      if(_s < FLT_EPSILON && _pn > FLT_EPSILON)
+    {
+      _betan = 0.0f;
+    }
+    else if(_s > _smax && _pn < -FLT_EPSILON)
+    {
+      _betan = 0.0f;
+    }
+    else
+    {
+      _betan = 1.0f;
+    }
+
+    if(_pr<-FLT_EPSILON)
+    {
+      _betarp = 1.0f;
+    }
+    else
+    {
+      _betarp = _betar;
+    }
+
+    if(_pn<-FLT_EPSILON)
+    {
+      _betanp = 1.0f;
+    }
+    else
+    {
+      _betanp = _betan;
+    }
 }
 
 
 void SurfacePolishing::computeModulatedDS()
 {
-  if(_sigmac>FLT_EPSILON)
-  {
-    _gain = 1.0f;
-  }
-  else
-  {
-    _gain = 0.0f;
-  }
-  // _gain = 0.0f;
+  _gain = 0.0f;
 
   // Update tank scalar variables
   updateTankScalars();
 
   // Compute corrected nominal DS and modulation terms
   _fxp = _fxc+_betarp*_fxr;
-  _fxtp = _betatp*_fxt;
   _fxnp = _betanp*_fxn;
 
   // Update tank dynamics
-  _pd = _v.transpose()*(Eigen::Matrix3f::Identity()-_gain*_n*_n.transpose())*_D*_v;
-  float ds = _dt*(_alpha*_pd-_betar*_pr-_betat*_pt-_betan*_pn);
+  _pd = _v.transpose()*_D*_v;
+  float ds = _dt*(_alpha*_pd-_betar*_pr-_betan*_pn);
 
   if(_s+ds>=_smax)
   {
     _s = _smax;
   }
-  else if(_s+ds<=0.0f)
+  else if(_s+ds<-FLT_EPSILON)
   {
     _s = 0.0f;
   }
@@ -793,10 +805,10 @@ void SurfacePolishing::computeModulatedDS()
   }
 
   // Update robot's power flow
-  _dW = (_betarp-_betar)*_pr+(_betatp-_betat)*_pt+(_betanp-_betan)*_pn-(1-_alpha)*_pd;
+  _dW = (_betarp-_betar)*_pr+(_betanp-_betan)*_pn-(1-_alpha)*_pd;
 
   // Compute modulated DS
-  _vd = _fxp+_fxtp+_fxnp;
+  _vd = _fxp+_fxnp;
 
   // Bound modulated DS for safety 
   if(_vd.norm()>_velocityLimit)
@@ -808,11 +820,11 @@ void SurfacePolishing::computeModulatedDS()
 
   if(!_adaptNormalModulation)
   {
-    std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd corrected:  " << _betanp*_sigmac*_Fd << std::endl;
+    std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd corrected:  " << _betanp*_Fd << std::endl;
   }
   else
   {
-    std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd corrected:  " << _betanp*_sigmac*(_Fd+_deltaF) << std::endl;
+    std::cerr << "[SurfacePolishing]: F: " << _normalForce << " Fd corrected:  " << _betanp*(_Fd+_c*_deltaF) << std::endl;
   }
 
   std::cerr << "[SurfacePolishing]: vd: " << _vd.norm() << " v: " << _v.norm() <<std::endl;
@@ -862,153 +874,6 @@ void SurfacePolishing::computeDesiredOrientation()
   _omegad = omegaTemp; 
 }
 
-
-void SurfacePolishing::normalEstimation()
-{
-  Eigen::Vector3f npred_d;
-  Eigen::Matrix3f Ld;
-  float gamma = 1000;
-  float beta = 1;
-  Eigen::Vector3f vtool = _v+_toolOffsetFromEE*_w.cross(_wRb.col(2));
-  npred_d = -gamma*(Eigen::Matrix3f::Identity()-_npred*_npred.transpose())*_L*_npred;
-  Ld = -beta*_L+(1.0f/(1.0f+vtool.squaredNorm()))*vtool*vtool.transpose();
-  if(_normalForce>5.0f)
-  {
-    // _npred+= _dt*npred_d;
-    _L+= _dt*Ld;
-    // _npred = _npred.normalized();
-  }
-
-  bool ok = false;
-  if(_normalForce>5.0f)
-  {
-    Eigen::Vector3f F = -_wRb*_filteredWrench.segment(0,3);
-    if(vtool.norm()>1e-2f)
-    {
-      Eigen::Vector3f t = vtool.normalized();
-      Eigen::Vector3f Fn = (Eigen::Matrix3f::Identity()-t*t.transpose())*F;
-      _npred = Fn.normalized();
-      // std::cerr << (t*t.transpose()*F).transpose() << std::endl;
-    //   std::cerr << "A" << std::endl;
-    }
-    else
-    {
-      _npred = F.normalized(); 
-    //   std::cerr << "B" << std::endl;
-    }
-
-      ok = true;
-  //   // Ld = -beta*_L+(1.0f/(1.0f+vtool.squaredNorm()))*vtool*vtool.transpose();
-  //   // npred_d = -gamma*(Eigen::Matrix3f::Identity()-_npred*_npred.transpose())*_L*F.normalized();
-    
-  //   // _L+= _dt*Ld;
-  //   // _npred+= _dt*npred_d;
-  //   // _npred = _npred.normalized();
-
-  }
-  else
-  {
-    // _npred << 0.0f,0.0f,-1.0f;
-  }
-
-
-  // std::cerr << _L << std::endl << std::endl;
-  // std::cerr << _npred.transpose() << std::endl;
- 
-  // Eigen::Matrix3f A;
-  Eigen::Matrix3f A,Ap;
-  A.setIdentity();
-  
- // if(vtool.norm()> 0.01f && _normalForce>5.0f)
- // {
- //    Ap.col(0) = -2*vtool(0)*vtool.normalized();
- //    Ap.col(1) = -2*vtool(1)*vtool.normalized();
- //    Ap.col(2) = -2*vtool(2)*vtool.normalized();
- //    A = A+_dt*Ap;
- //  }
-  // Eigen::Matrix<float,6,6> Ppred;
-  // Eigen::Matrix<float,6,1> Xpred;
-  Eigen::Matrix3f C;
-  C.setIdentity();
-
-  Eigen::Matrix3f R;
-  R.setConstant(0.0f);
-  R(0,0) = 0.1f;
-  R(1,1) = 0.1f;
-  R(2,2) = 0.1f;
-
-  Eigen::Matrix3f Q;
-  Q.setConstant(0.0f);
-  Q(0,0) = 0.00001f;
-  Q(1,1) = 0.00001f;
-  Q(2,2) = 0.00001f;
-
-  _X = A*_X;  
-  _P = A*_P*A.transpose() + Q;
-  Eigen::Matrix3f G;
-  G = _P*C.transpose()*(C*_P*C.transpose()+R).inverse();
-
-  if(ok)
-  {
-    _X = _X+G*(_npred-C*_X);
-    _P = (A-G*C)*_P;
-  }
-
-  _X.normalize();
-
-
-  //  _X -=_X.dot(vtool)*vtool.normalized();
-  //  _X.normalize();
-  // }
-  std::cerr <<"kalman: " <<_X.transpose() << std::endl;
-
-  Eigen::Vector3f theta;
-  float variance = 1.0f;
-  float angle1;
-  float angle2;
-  if(_gpr->get_n_data()==0)
-  {
-    _gpr->AddTrainingData(_x,_X);
-    _Xgpr = _X; 
-  }
-  else
-  {
-
-    Eigen::Vector3f k;
-    theta = _gpr->DoRegression(_x);
-    theta.normalize();
-    angle1 = std::acos(_X.dot(_npred));
-    angle2 = std::acos(_npred.dot(theta));
-    if(fabs(angle2)>10*M_PI/180.0f)
-    {
-      _gpr->AddTrainingData(_x,_npred);
-    }
-    else
-    {
-    }
-    std::cerr << "ANGLE: " << fabs(angle2)*180/M_PI<< std::endl;
-    theta = _gpr->DoRegression(_x,variance);
-    theta.normalize();
-    if(variance<0.1f && _gpr->get_n_data()>5)
-    {
-      _Xgpr = theta;
-    }
-    else
-    {
-      _Xgpr = _X; 
-    }    
-  }
-
-  _Xgpr = _X;
-  std::cerr << "variance: " << variance << " " << _gpr->get_n_data() << std::endl;
-
-  // _npred += _npre
-
-  // _gpr->AddTrainingData(_x,_npred);
-  std::cerr << _Xgpr.transpose() << std::endl;
-}
-
-
 void SurfacePolishing::logData()
 {
   _outputFile << ros::Time::now() << " "
@@ -1016,7 +881,6 @@ void SurfacePolishing::logData()
               << _v.transpose() << " "
               << _fx.transpose() << " "
               << _fxp.transpose() << " "
-              << _fxtp.transpose() << " "
               << _fxnp.transpose() << " "
               << _vd.transpose() << " "
               << _n.transpose() << " "
@@ -1025,20 +889,16 @@ void SurfacePolishing::logData()
               << _normalDistance << " "
               << _normalForce << " "
               << _Fd << " "
-              << _sigmac << " "
-              << _deltaf << " "
+              << _c << " "
               << _deltaF << " "
               << _sequenceID << " "
               << _s << " " 
               << _pd << " " 
               << _pr << " " 
-              << _pt << " " 
               << _pn << " " 
               << _alpha << " "
               << _betar << " "
               << _betarp << " "
-              << _betat << " "
-              << _betatp << " "
               << _betan << " "
               << _betanp << " "
               << _dW << " " << std::endl;
