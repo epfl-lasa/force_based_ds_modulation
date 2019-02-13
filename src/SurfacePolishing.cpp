@@ -206,7 +206,7 @@ bool SurfacePolishing::init()
   _pubMarker = _nh.advertise<visualization_msgs::Marker>("SurfacePolishing/plane", 1);
   _pubTaskAttractor = _nh.advertise<geometry_msgs::PointStamped>("SurfacePolishing/taskAttractor", 1);  
   _pubNormalForce = _nh.advertise<std_msgs::Float32>("SurfacePolishing/normalForce", 1);
-  _pubContactTask = _nh.advertise<lwr_controllers::ContactTaskMsg>("/lwr/joint_controllers/passive_ds_command_contact_task", 1);
+  // _pubContactTask = _nh.advertise<lwr_controllers::ContactTaskMsg>("/lwr/joint_controllers/passive_ds_command_contact_task", 1);
 
   // Dynamic reconfigure definition
   _dynRecCallback = boost::bind(&SurfacePolishing::dynamicReconfigureCallback, this, _1, _2);
@@ -908,42 +908,42 @@ void SurfacePolishing::logData()
 void SurfacePolishing::publishData()
 {
   // Publish desired twist (passive ds controller)
-  // _msgDesiredTwist.linear.x  = _vd(0);
-  // _msgDesiredTwist.linear.y  = _vd(1);
-  // _msgDesiredTwist.linear.z  = _vd(2);
+  _msgDesiredTwist.linear.x  = _vd(0);
+  _msgDesiredTwist.linear.y  = _vd(1);
+  _msgDesiredTwist.linear.z  = _vd(2);
 
-  // // Convert desired end effector frame angular velocity to world frame
-  // _msgDesiredTwist.angular.x = _omegad(0);
-  // _msgDesiredTwist.angular.y = _omegad(1);
-  // _msgDesiredTwist.angular.z = _omegad(2);
+  // Convert desired end effector frame angular velocity to world frame
+  _msgDesiredTwist.angular.x = _omegad(0);
+  _msgDesiredTwist.angular.y = _omegad(1);
+  _msgDesiredTwist.angular.z = _omegad(2);
 
-  // _pubDesiredTwist.publish(_msgDesiredTwist);
+  _pubDesiredTwist.publish(_msgDesiredTwist);
 
-  // // Publish desired orientation
-  // _msgDesiredOrientation.w = _qd(0);
-  // _msgDesiredOrientation.x = _qd(1);
-  // _msgDesiredOrientation.y = _qd(2);
-  // _msgDesiredOrientation.z = _qd(3);
+  // Publish desired orientation
+  _msgDesiredOrientation.w = _qd(0);
+  _msgDesiredOrientation.x = _qd(1);
+  _msgDesiredOrientation.y = _qd(2);
+  _msgDesiredOrientation.z = _qd(3);
 
-  // _pubDesiredOrientation.publish(_msgDesiredOrientation);
+  _pubDesiredOrientation.publish(_msgDesiredOrientation);
 
-  _msgContactTask.twist.linear.x  = _vd(0);
-  _msgContactTask.twist.linear.y  = _vd(1);
-  _msgContactTask.twist.linear.z  = _vd(2);
-  _msgContactTask.twist.angular.x = _omegad(0);
-  _msgContactTask.twist.angular.y = _omegad(1);
-  _msgContactTask.twist.angular.z = _omegad(2);
-  _msgContactTask.quaternion.w = _qd(0);
-  _msgContactTask.quaternion.x = _qd(1);
-  _msgContactTask.quaternion.y = _qd(2);
-  _msgContactTask.quaternion.z = _qd(3);
-  _msgContactTask.n.x = _n(0);
-  _msgContactTask.n.y = _n(1);
-  _msgContactTask.n.z = _n(2);
-  std::cerr << "gain: "<< _gain << std::endl;
-  _msgContactTask.gain = _gain;
+  // _msgContactTask.twist.linear.x  = _vd(0);
+  // _msgContactTask.twist.linear.y  = _vd(1);
+  // _msgContactTask.twist.linear.z  = _vd(2);
+  // _msgContactTask.twist.angular.x = _omegad(0);
+  // _msgContactTask.twist.angular.y = _omegad(1);
+  // _msgContactTask.twist.angular.z = _omegad(2);
+  // _msgContactTask.quaternion.w = _qd(0);
+  // _msgContactTask.quaternion.x = _qd(1);
+  // _msgContactTask.quaternion.y = _qd(2);
+  // _msgContactTask.quaternion.z = _qd(3);
+  // _msgContactTask.n.x = _n(0);
+  // _msgContactTask.n.y = _n(1);
+  // _msgContactTask.n.z = _n(2);
+  // std::cerr << "gain: "<< _gain << std::endl;
+  // _msgContactTask.gain = _gain;
 
-  _pubContactTask.publish(_msgContactTask);
+  // _pubContactTask.publish(_msgContactTask);
 
   _msgTaskAttractor.header.frame_id = "world";
   _msgTaskAttractor.header.stamp = ros::Time::now();

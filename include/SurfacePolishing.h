@@ -24,8 +24,8 @@
 #include "force_based_ds_modulation/surfacePolishing_paramsConfig.h"
 #include "Eigen/Eigen"
 #include "svm_grad.h"
-#include "gaussian_process_regression/gaussian_process_regression.h"
-#include <lwr_controllers/ContactTaskMsg.h>
+// #include "gaussian_process_regression/gaussian_process_regression.h"
+// #include <lwr_controllers/ContactTaskMsg.h>
 
 
 #define NB_SAMPLES 50
@@ -61,7 +61,7 @@ class SurfacePolishing
 		ros::Publisher _pubMarker;						  		// Marker (RVIZ) 
 		ros::Publisher _pubTaskAttractor;						// Attractor on surface (RVIZ)
 		ros::Publisher _pubNormalForce;							// Measured normal force to the surface
-		ros::Publisher _pubContactTask;							// Measured normal force to the surface
+		// ros::Publisher _pubContactTask;							// Measured normal force to the surface
 		
 		// Messages declaration
 		geometry_msgs::Pose _msgRealPose;
@@ -72,7 +72,7 @@ class SurfacePolishing
 		visualization_msgs::Marker _msgArrowMarker;
 		geometry_msgs::PointStamped _msgTaskAttractor;
 		geometry_msgs::WrenchStamped _msgFilteredWrench;
-		lwr_controllers::ContactTaskMsg _msgContactTask;
+		// lwr_controllers::ContactTaskMsg _msgContactTask;
 		
 		// Tool characteristics
 		float _toolMass;														// Tool mass [kg]
