@@ -20,9 +20,13 @@ SurfaceLearning::SurfaceLearning(ros::NodeHandle &n, double frequency, std::stri
   me = this;
 
   _gravity << 0.0f, 0.0f, -9.80665f;
-  _toolComPositionFromSensor << 0.0f,0.0f,0.02f;
-  _toolOffsetFromEE = 0.15f;
-  _toolMass = 0.1f;
+  // _toolComPositionFromSensor << 0.0f,0.0f,0.02f;
+  // _toolOffsetFromEE = 0.15f;
+  // _toolMass = 0.1f;
+  _toolComPositionFromSensor << 0.0f,0.0f,0.08f;
+  _toolOffsetFromEE = 0.265f;
+  _toolMass = 0.630f;
+
 
   _x.setConstant(0.0f);
   _q.setConstant(0.0f);
@@ -45,11 +49,11 @@ SurfaceLearning::SurfaceLearning(ros::NodeHandle &n, double frequency, std::stri
   _firstWrenchReceived = false;
   for(int k = 0; k < TOTAL_NB_MARKERS; k++)
   {
-    _firstOptitrackPose[k] = false;
+    _firstOptitrackPose[k] = true;
   }
   _wrenchBiasOK = false;
   _stop = false;
-  _optitrackOK = false;
+  _optitrackOK = true;
 
 
   _markersPosition.setConstant(0.0f);
@@ -58,7 +62,7 @@ SurfaceLearning::SurfaceLearning(ros::NodeHandle &n, double frequency, std::stri
   _markersTracked.setConstant(0);
 
   _forceThreshold = 3.0f;
-  _heightThreshold = 0.1f;
+  _heightThreshold = 1000.0f;
   _heightOffset = 0.3f;
 
   _sequenceID = 0;
@@ -280,20 +284,24 @@ void SurfaceLearning::computeCommand()
   // |
   // P3
   // Compute markers position in the robot frame
-  _p1 = _markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS);
-  _p2 = _markersPosition.col(P2)-_markersPosition0.col(ROBOT_BASIS);
-  _p3 = _markersPosition.col(P3)-_markersPosition0.col(ROBOT_BASIS);
+  // _p1 = _markersPosition.col(P1)-_markersPosition0.col(ROBOT_BASIS);
+  // _p2 = _markersPosition.col(P2)-_markersPosition0.col(ROBOT_BASIS);
+  // _p3 = _markersPosition.col(P3)-_markersPosition0.col(ROBOT_BASIS);
 
-  // Compute surface frame, wRs is the rotation matrix for the surface frame to the world frame  
-  _wRs.col(0) = (_p1-_p3).normalized();
-  _wRs.col(1) = (_p1-_p2).normalized();
-  _wRs.col(2) = ((_wRs.col(0)).cross(_wRs.col(1))).normalized();
+  // // Compute surface frame, wRs is the rotation matrix for the surface frame to the world frame  
+  // _wRs.col(0) = (_p1-_p3).normalized();
+  // _wRs.col(1) = (_p1-_p2).normalized();
+  // _wRs.col(2) = ((_wRs.col(0)).cross(_wRs.col(1))).normalized();
 
+  _wRs << 1.0f, 0.0f, 0.0f,
+          0.0f, 1.0f, 0.0f,
+          0.0f, 0.0f, 1.0f;
   if(_mode == TESTING)
   {
     // Compute robot postion in surface frame
     Eigen::Vector3f x;
-    x = _wRs.transpose()*(_x-_p1);
+    // x = _wRs.transpose()*(_x-_p1);
+    x = _wRs.transpose()*_x;
     
     _svm.preComputeKernel(true);
     // We compute the normal distance by evlauating the SVM model
@@ -328,7 +336,7 @@ void SurfaceLearning::computeDesiredOrientation()
     k /= s;
     
     Eigen::Matrix3f K;
-    K << Utils::getSkewSymmetricMatrix(k);
+    K << Utils<float>::getSkewSymmetricMatrix(k);
 
     Eigen::Matrix3f Re;
     if(fabs(s)< FLT_EPSILON)
@@ -343,21 +351,21 @@ void SurfaceLearning::computeDesiredOrientation()
     // Convert rotation error into axis angle representation
     Eigen::Vector3f omega;
     float angle;
-    Eigen::Vector4f qtemp = Utils::rotationMatrixToQuaternion(Re);
-    Utils::quaternionToAxisAngle(qtemp,omega,angle);
+    Eigen::Vector4f qtemp = Utils<float>::rotationMatrixToQuaternion(Re);
+    Utils<float>::quaternionToAxisAngle(qtemp,omega,angle);
 
     // Compute final quaternion on plane
-    Eigen::Vector4f qf = Utils::quaternionProduct(qtemp,_q);
+    Eigen::Vector4f qf = Utils<float>::quaternionProduct(qtemp,_q);
 
     // Perform quaternion slerp interpolation to progressively orient the end effector while approaching the plane
-    _qd = Utils::slerpQuaternion(_q,qf,1.0f-std::tanh(5.0f*_normalDistance));
+    _qd = Utils<float>::slerpQuaternion(_q,qf,1.0f-std::tanh(5.0f*_normalDistance));
     // _qd = slerpQuaternion(_q,qf,1.0f);
 
     // Compute needed angular velocity to perform the desired quaternion
     Eigen::Vector4f qcurI, wq;
     qcurI(0) = _q(0);
     qcurI.segment(1,3) = -_q.segment(1,3);
-    wq = 5.0f*Utils::quaternionProduct(qcurI,_qd-_q);
+    wq = 5.0f*Utils<float>::quaternionProduct(qcurI,_qd-_q);
     Eigen::Vector3f omegaTemp = _wRb*wq.segment(1,3);
     _omegad = omegaTemp;    
   }
@@ -374,7 +382,8 @@ void SurfaceLearning::collectData()
 {
   // Compute robot postion in surface frame
   Eigen::Vector3f x;
-  x = _wRs.transpose()*(_x-_p1);
+  // x = _wRs.transpose()*(_x-_p1);
+  x = _wRs.transpose()*_x;
     
   // Write data to file
   _outputFile << ros::Time::now() << " "
@@ -667,7 +676,7 @@ void SurfaceLearning::updateRobotPose(const geometry_msgs::Pose::ConstPtr& msg)
   // Update end effecotr pose (position+orientation)
   _x << _msgRealPose.position.x, _msgRealPose.position.y, _msgRealPose.position.z;
   _q << _msgRealPose.orientation.w, _msgRealPose.orientation.x, _msgRealPose.orientation.y, _msgRealPose.orientation.z;
-  _wRb = Utils::quaternionToRotationMatrix(_q);
+  _wRb = Utils<float>::quaternionToRotationMatrix(_q);
   _x = _x+_toolOffsetFromEE*_wRb.col(2);
 
   // Make sure to add new points to dataset

@@ -634,7 +634,7 @@ void SurfacePolishing::computeNominalDS()
   else
   {
     u/=u.norm();
-    K = Utils::getSkewSymmetricMatrix(u);
+    K = Utils<float>::getSkewSymmetricMatrix(u);
     R = Eigen::Matrix3f::Identity()+std::sin(theta)*K+(1.0f-std::cos(theta))*K*K;
   }
 
@@ -702,30 +702,30 @@ void SurfacePolishing::updateTankScalars()
   float dp = 0.2f;
   float ds = 0.1f*_smax;
 
-  // _alpha = Utils::smoothFall(_s,_smax-ds,_smax);
+  // _alpha = Utils<float>::smoothFall(_s,_smax-ds,_smax);
 
   // _pr = _d1*_v.dot(_fxr);
 
-  // _betar = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
-  //           -Utils::smoothFall(_pr,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
+  // _betar = 1-Utils<float>::smoothRise(_pr,-2*dp,-1*dp)*Utils<float>::smoothFall(_s,0.0f,ds)
+  //           -Utils<float>::smoothFall(_pr,1*dp,2*dp)*Utils<float>::smoothRise(_s,_smax-ds,_smax);
 
-  // _betarp = 1-Utils::smoothRise(_pr,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+  // _betarp = 1-Utils<float>::smoothRise(_pr,-2*dp,-1*dp)*Utils<float>::smoothFall(_s,0.0f,ds);
 
   // _pt = _d1*_v.dot(_fxt);
 
-  // _betat = 1-Utils::smoothRise(_pt,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
-  //           -Utils::smoothFall(_pt,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
+  // _betat = 1-Utils<float>::smoothRise(_pt,-2*dp,-1*dp)*Utils<float>::smoothFall(_s,0.0f,ds)
+  //           -Utils<float>::smoothFall(_pt,1*dp,2*dp)*Utils<float>::smoothRise(_s,_smax-ds,_smax);
 
-  // _betatp = 1-Utils::smoothRise(_pt,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+  // _betatp = 1-Utils<float>::smoothRise(_pt,-2*dp,-1*dp)*Utils<float>::smoothFall(_s,0.0f,ds);
 
   // _pn = _d1*_v.dot(_fxn);
 
-  // _betan = 1-Utils::smoothRise(_pn,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds)
-  //           -Utils::smoothFall(_pn,1*dp,2*dp)*Utils::smoothRise(_s,_smax-ds,_smax);
+  // _betan = 1-Utils<float>::smoothRise(_pn,-2*dp,-1*dp)*Utils<float>::smoothFall(_s,0.0f,ds)
+  //           -Utils<float>::smoothFall(_pn,1*dp,2*dp)*Utils<float>::smoothRise(_s,_smax-ds,_smax);
 
-  // _betanp = 1-Utils::smoothRise(_pn,-2*dp,-1*dp)*Utils::smoothFall(_s,0.0f,ds);
+  // _betanp = 1-Utils<float>::smoothRise(_pn,-2*dp,-1*dp)*Utils<float>::smoothFall(_s,0.0f,ds);
 
-    _alpha = Utils::smoothFall(_s,_smax-ds,_smax);
+    _alpha = Utils<float>::smoothFall(_s,_smax-ds,_smax);
 
     _pr = _d1*_v.dot(_fxr);
     _pn = _d1*_v.dot(_fxn);
@@ -841,7 +841,7 @@ void SurfacePolishing::computeDesiredOrientation()
   k /= s;
   
   Eigen::Matrix3f K;
-  K << Utils::getSkewSymmetricMatrix(k);
+  K << Utils<float>::getSkewSymmetricMatrix(k);
 
   Eigen::Matrix3f Re;
   if(fabs(s)< FLT_EPSILON)
@@ -856,20 +856,20 @@ void SurfacePolishing::computeDesiredOrientation()
   // Convert rotation error into axis angle representation
   Eigen::Vector3f omega;
   float angle;
-  Eigen::Vector4f qtemp = Utils::rotationMatrixToQuaternion(Re);
-  Utils::quaternionToAxisAngle(qtemp,omega,angle);
+  Eigen::Vector4f qtemp = Utils<float>::rotationMatrixToQuaternion(Re);
+  Utils<float>::quaternionToAxisAngle(qtemp,omega,angle);
 
   // Compute final quaternion on plane
-  Eigen::Vector4f qf = Utils::quaternionProduct(qtemp,_q);
+  Eigen::Vector4f qf = Utils<float>::quaternionProduct(qtemp,_q);
 
   // Perform quaternion slerp interpolation to progressively orient the end effector while approaching the surface
-  _qd = Utils::slerpQuaternion(_q,qf,1.0f-std::tanh(5.0f*_normalDistance));
+  _qd = Utils<float>::slerpQuaternion(_q,qf,1.0f-std::tanh(5.0f*_normalDistance));
   // _qd = qf;
   // Compute needed angular velocity to perform the desired quaternion
   Eigen::Vector4f qcurI, wq;
   qcurI(0) = _q(0);
   qcurI.segment(1,3) = -_q.segment(1,3);
-  wq = 5.0f*Utils::quaternionProduct(qcurI,_qd-_q);
+  wq = 5.0f*Utils<float>::quaternionProduct(qcurI,_qd-_q);
   Eigen::Vector3f omegaTemp = _wRb*wq.segment(1,3);
   _omegad = omegaTemp; 
 }
@@ -977,7 +977,7 @@ void SurfacePolishing::publishData()
   R.col(0) = u;
   R.col(1) = v;
   R.col(2) = n;
-  Eigen::Vector4f q = Utils::rotationMatrixToQuaternion(R);
+  Eigen::Vector4f q = Utils<float>::rotationMatrixToQuaternion(R);
 
   _msgMarker.pose.orientation.x = q(1);
   _msgMarker.pose.orientation.y = q(2);
@@ -1023,7 +1023,7 @@ void SurfacePolishing::updateRobotPose(const geometry_msgs::Pose::ConstPtr& msg)
   // Update end effecotr pose (position+orientation)
   _x << _msgRealPose.position.x, _msgRealPose.position.y, _msgRealPose.position.z;
   _q << _msgRealPose.orientation.w, _msgRealPose.orientation.x, _msgRealPose.orientation.y, _msgRealPose.orientation.z;
-  _wRb = Utils::quaternionToRotationMatrix(_q);
+  _wRb = Utils<float>::quaternionToRotationMatrix(_q);
   _x = _x+_toolOffsetFromEE*_wRb.col(2);
 
   if((_x-temp).norm()>FLT_EPSILON)

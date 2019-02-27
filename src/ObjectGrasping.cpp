@@ -386,7 +386,7 @@ void ObjectGrasping::computeObjectPose()
     R.col(0) = xDir;
     R.col(1) = yDir;
     R.col(2) = zDir;
-    Eigen::Vector4f q = Utils::rotationMatrixToQuaternion(R);
+    Eigen::Vector4f q = Utils<float>::rotationMatrixToQuaternion(R);
     _msgMarker.pose.orientation.x = q(1);
     _msgMarker.pose.orientation.y = q(2);
     _msgMarker.pose.orientation.z = q(3);
@@ -710,27 +710,27 @@ void ObjectGrasping::updateTankScalars()
 
   for(int k = 0; k < NB_ROBOTS; k++)
   {
-    _alpha[k] = Utils::smoothFall(_s[k],_smax-ds,_smax);
+    _alpha[k] = Utils<float>::smoothFall(_s[k],_smax-ds,_smax);
 
     _pr[k] = _d1[k]*_v[k].dot(_fxr[k]);
 
-    // _betar[k] = 1-Utils::smoothRise(_pr[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds)
-    //           -Utils::smoothFall(_pr[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
+    // _betar[k] = 1-Utils<float>::smoothRise(_pr[k],-2*dp,-1*dp)*Utils<float>::smoothFall(_s[k],0.0f,ds)
+    //           -Utils<float>::smoothFall(_pr[k],1*dp,2*dp)*Utils<float>::smoothRise(_s[k],_smax-ds,_smax);
 
-    // _betarp[k] = 1-Utils::smoothRise(_pr[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds);
+    // _betarp[k] = 1-Utils<float>::smoothRise(_pr[k],-2*dp,-1*dp)*Utils<float>::smoothFall(_s[k],0.0f,ds);
 
-    // _betat[k] = 1-Utils::smoothRise(_pt[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds)
-    //           -Utils::smoothFall(_pt[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
+    // _betat[k] = 1-Utils<float>::smoothRise(_pt[k],-2*dp,-1*dp)*Utils<float>::smoothFall(_s[k],0.0f,ds)
+    //           -Utils<float>::smoothFall(_pt[k],1*dp,2*dp)*Utils<float>::smoothRise(_s[k],_smax-ds,_smax);
 
-    // _betatp[k] = 1-Utils::smoothRise(_pt[k],-2*dp,-1*dp)*Utils::smoothFall(_s[k],0.0f,ds);
+    // _betatp[k] = 1-Utils<float>::smoothRise(_pt[k],-2*dp,-1*dp)*Utils<float>::smoothFall(_s[k],0.0f,ds);
 
     _pn[k] = _d1[k]*_v[k].dot(_fxn[k]);
 
-    // _betan[k] = 1-Utils::smoothRise(_pn[k],-1*dp,-0*dp)*Utils::smoothFall(_s[k],0.0f,ds)
-    //           -Utils::smoothFall(_pn[k],0*dp,1*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
+    // _betan[k] = 1-Utils<float>::smoothRise(_pn[k],-1*dp,-0*dp)*Utils<float>::smoothFall(_s[k],0.0f,ds)
+    //           -Utils<float>::smoothFall(_pn[k],0*dp,1*dp)*Utils<float>::smoothRise(_s[k],_smax-ds,_smax);
 
-    // _betanp[k] = 1-Utils::smoothRise(_pn[k],-1*dp,-0*dp)*Utils::smoothFall(_s[k],0.0f,ds)               // -Utils::smoothFall(_pf[k],1*dp,2*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax)*Utils::smoothRise(_pf[k],-2*dp,-1*dp);
-    //            -Utils::smoothRise(_pn[k],-1*dp,0*dp)*Utils::smoothFall(_pn[k],0*dp,1*dp)*Utils::smoothRise(_s[k],_smax-ds,_smax);
+    // _betanp[k] = 1-Utils<float>::smoothRise(_pn[k],-1*dp,-0*dp)*Utils<float>::smoothFall(_s[k],0.0f,ds)               // -Utils<float>::smoothFall(_pf[k],1*dp,2*dp)*Utils<float>::smoothRise(_s[k],_smax-ds,_smax)*Utils<float>::smoothRise(_pf[k],-2*dp,-1*dp);
+    //            -Utils<float>::smoothRise(_pn[k],-1*dp,0*dp)*Utils<float>::smoothFall(_pn[k],0*dp,1*dp)*Utils<float>::smoothRise(_s[k],_smax-ds,_smax);
 
     if(_s[k] < -FLT_EPSILON && _pr[k] > FLT_EPSILON)
     {
@@ -862,7 +862,7 @@ void ObjectGrasping::computeDesiredOrientation()
     u /= s;
     
     Eigen::Matrix3f K;
-    K << Utils::getSkewSymmetricMatrix(u);
+    K << Utils<float>::getSkewSymmetricMatrix(u);
 
     Eigen::Matrix3f Re;
     if(fabs(s)< FLT_EPSILON)
@@ -877,14 +877,14 @@ void ObjectGrasping::computeDesiredOrientation()
     // Convert rotation error into axis angle representation
     Eigen::Vector3f omega;
     float angle;
-    Eigen::Vector4f qtemp = Utils::rotationMatrixToQuaternion(Re);
-    Utils::quaternionToAxisAngle(qtemp,omega,angle);
+    Eigen::Vector4f qtemp = Utils<float>::rotationMatrixToQuaternion(Re);
+    Utils<float>::quaternionToAxisAngle(qtemp,omega,angle);
 
     // Compute final quaternion on plane
-    Eigen::Vector4f qf = Utils::quaternionProduct(qtemp,_q[k]);
+    Eigen::Vector4f qf = Utils<float>::quaternionProduct(qtemp,_q[k]);
 
     // Perform quaternion slerp interpolation to progressively orient the end effector while approaching the object surface
-    _qd[k] = Utils::slerpQuaternion(_q[k],qf,1.0f-std::tanh(3.0f*_eD));
+    _qd[k] = Utils<float>::slerpQuaternion(_q[k],qf,1.0f-std::tanh(3.0f*_eD));
 
     if(_qd[k].dot(_qdPrev[k])<0.0f)
     {
@@ -895,7 +895,7 @@ void ObjectGrasping::computeDesiredOrientation()
     Eigen::Vector4f qcurI, wq;
     qcurI(0) = _q[k](0);
     qcurI.segment(1,3) = -_q[k].segment(1,3);
-    wq = 5.0f*Utils::quaternionProduct(qcurI,_qd[k]-_q[k]);
+    wq = 5.0f*Utils<float>::quaternionProduct(qcurI,_qd[k]-_q[k]);
     Eigen::Vector3f omegaTemp = _wRb[k]*wq.segment(1,3);
     _omegad[k] = omegaTemp; 
     _qdPrev[k] = _qd[k];
@@ -1006,7 +1006,7 @@ void ObjectGrasping::updateRobotPose(const geometry_msgs::Pose::ConstPtr& msg, i
   // Update end effecotr pose (position+orientation)
   _x[k] << msg->position.x, msg->position.y, msg->position.z;
   _q[k] << msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z;
-  _wRb[k] = Utils::quaternionToRotationMatrix(_q[k]);
+  _wRb[k] = Utils<float>::quaternionToRotationMatrix(_q[k]);
   _x[k] = _x[k]+_toolOffsetFromEE*_wRb[k].col(2);
 
   if(k==(int)LEFT)
